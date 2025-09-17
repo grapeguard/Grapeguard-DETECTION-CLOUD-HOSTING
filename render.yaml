@@ -1,0 +1,41 @@
+services:
+  - type: web
+    name: grapeguard
+    env: static
+    buildCommand: npm install && npm run build
+    staticPublishPath: ./build
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: REACT_APP_AUTH_API_KEY
+        value: AIzaSyCUc3Serwlq4Z-6ToXbR8vmEQxWmlBXOk8
+      - key: REACT_APP_AUTH_DOMAIN
+        value: grapeguard-acc43.firebaseapp.com
+      - key: REACT_APP_AUTH_DATABASE_URL
+        value: https://grapeguard-acc43-default-rtdb.asia-southeast1.firebasedatabase.app
+      - key: REACT_APP_AUTH_PROJECT_ID
+        value: grapeguard-acc43
+      - key: REACT_APP_AUTH_STORAGE_BUCKET
+        value: grapeguard-acc43.firebasestorage.app
+      - key: REACT_APP_AUTH_MESSAGING_SENDER_ID
+        value: 270802234818
+      - key: REACT_APP_AUTH_APP_ID
+        value: 1:270802234818:web:234a9bb8bf19add71fba5b
+      - key: REACT_APP_AUTH_MEASUREMENT_ID
+        value: G-3483H8EYFD
+      - key: REACT_APP_SENSOR_API_KEY
+        value: AIzaSyD3Ijs8q_qkUSE8lvNd_Zvzr-uvdWBjISs
+      - key: REACT_APP_SENSOR_DOMAIN
+        value: grapeguard-c7ad9.firebaseapp.com
+      - key: REACT_APP_SENSOR_DATABASE_URL
+        value: https://grapeguard-c7ad9-default-rtdb.firebaseio.com
+      - key: REACT_APP_SENSOR_PROJECT_ID
+        value: grapeguard-c7ad9
+      - key: REACT_APP_SENSOR_STORAGE_BUCKET
+        value: grapeguard-c7ad9.firebasestorage.app
+      - key: REACT_APP_SENSOR_MESSAGING_SENDER_ID
+        value: 842909622610
+      - key: REACT_APP_SENSOR_APP_ID
+        value: 1:842909622610:web:fc7b3def304e2240b75a8b
+      - key: REACT_APP_SENSOR_MEASUREMENT_ID
+        value: G-GPWZ3RW2SS
