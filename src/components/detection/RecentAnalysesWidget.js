@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import AnalysisHistory from './AnalysisHistory';
-import AnalysisHistoryService from '../../services/AnalysisHistoryService';
+import analysisSupabaseService from '../../services/AnalysisSupabaseService';
 import { useAuth } from '../../context/AuthContext';
 
 export default function RecentAnalysesWidget() {
@@ -11,7 +11,11 @@ export default function RecentAnalysesWidget() {
     let isMounted = true;
     (async () => {
       try {
-        const items = await AnalysisHistoryService.getAnalysisHistory(currentUser?.uid, 10);
+        if (!currentUser?.uid) {
+          setAnalysisHistory([]);
+          return;
+        }
+        const items = await analysisSupabaseService.listUserAnalyses(currentUser.uid, 10);
         if (isMounted) setAnalysisHistory(items);
       } catch (e) {
         console.error('Failed to load recent analyses:', e);
