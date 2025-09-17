@@ -28,11 +28,14 @@ import { useTranslation } from '../../context/LanguageContext';
 import GoogleDriveService from '../../services/GoogleDriveService';
 import DetectronDiseaseService from '../../services/DetectronDiseaseService';
 import EnhancedCameraCard from './EnhancedCameraCard';
+import { useAuth } from '../../context/AuthContext';
+import analysisSupabaseService from '../../services/AnalysisSupabaseService';
 
 export default function LiveCameraFeed() {
   const [driveService] = useState(new GoogleDriveService());
   const [detectionService] = useState(new DetectronDiseaseService());
   const { t, language, formatSensorValue } = useTranslation();
+  const { currentUser } = useAuth();
   
   // Helper function to get translated severity label
   const getSeverityLabel = (severity) => {
@@ -239,8 +242,52 @@ export default function LiveCameraFeed() {
         camera2: camera2Result
       };
       
+      
       setCameraResults(results);
       saveToHistory(results);
+      // Persist each result to Supabase (Storage + Database)
+      try {
+        if (currentUser?.uid) {
+          const tasks = [];
+          if (camera1Result) {
+            tasks.push(
+              analysisSupabaseService.uploadImagesAndSave(currentUser.uid, {
+                originalImageDataUrl: camera1Result.originalImage,
+                visualizationImageDataUrl: camera1Result.visualizationImage,
+                result: {
+                  disease: camera1Result.detection?.disease,
+                  confidence: camera1Result.detection?.confidence,
+                  severity: camera1Result.detection?.severity,
+                  detectedRegions: camera1Result.detection?.detectedRegions,
+                  modelType: camera1Result.modelType
+                },
+                context: 'live',
+                camera: 1
+              })
+            );
+          }
+          if (camera2Result) {
+            tasks.push(
+              analysisSupabaseService.uploadImagesAndSave(currentUser.uid, {
+                originalImageDataUrl: camera2Result.originalImage,
+                visualizationImageDataUrl: camera2Result.visualizationImage,
+                result: {
+                  disease: camera2Result.detection?.disease,
+                  confidence: camera2Result.detection?.confidence,
+                  severity: camera2Result.detection?.severity,
+                  detectedRegions: camera2Result.detection?.detectedRegions,
+                  modelType: camera2Result.modelType
+                },
+                context: 'live',
+                camera: 2
+              })
+            );
+          }
+          await Promise.allSettled(tasks);
+        }
+      } catch (persistErr) {
+        console.error('Failed to persist live results to Supabase:', persistErr);
+      }
       
       console.log('🎉 Auto detection completed successfully!');
       
