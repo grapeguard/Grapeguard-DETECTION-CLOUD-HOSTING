@@ -1,4 +1,4 @@
-import { supabaseData, uploadImage } from './supabaseData';
+import { supabaseData, uploadImage, detectionService } from './supabaseData';
 import { v4 as uuidv4 } from 'uuid';
 
 async function dataUrlToBlob(dataUrl) {
@@ -59,7 +59,7 @@ class AnalysisSupabaseService {
         camera: camera
       };
 
-      const savedDetection = await supabaseData.detectionService.createDetection(firebaseUserId, detectionData);
+      const savedDetection = await detectionService.createDetection(firebaseUserId, detectionData);
 
       return {
         id: savedDetection.id,
@@ -78,7 +78,7 @@ class AnalysisSupabaseService {
     if (!firebaseUserId) return [];
     
     try {
-      const detections = await supabaseData.detectionService.getUserDetections(firebaseUserId, max);
+      const detections = await detectionService.getUserDetections(firebaseUserId, max);
       
       // Map to AnalysisHistory card format
       return detections.map(detection => ({
