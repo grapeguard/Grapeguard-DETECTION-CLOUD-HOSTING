@@ -29,10 +29,13 @@ import ResultsSection from './ResultsSection';
 import AnalysisHistory from './AnalysisHistory';
 import LiveCameraFeed from '../live-monitoring/LiveCameraFeed';
 import { useStorageManager } from './hooks/useStorageManager';
+import { useAuth } from '../../context/AuthContext';
+import analysisSupabaseService from '../../services/AnalysisSupabaseService';
 
 export default function DiseaseDetection() {
   const location = useLocation();
   const { t } = useTranslation();
+  const { currentUser } = useAuth();
   
   // Support tab navigation from alerts
   const [activeTab, setActiveTab] = useState(() => {
@@ -225,6 +228,20 @@ export default function DiseaseDetection() {
       
       setResults(finalResult);
       saveToHistory(result, selectedImage, modelInfo);
+
+      // Save to Supabase (Storage + Database) for the logged-in user
+      try {
+        if (currentUser?.uid) {
+          await analysisSupabaseService.uploadImagesAndSave(currentUser.uid, {
+            originalImageDataUrl: selectedImage,
+            visualizationImageDataUrl: result.visualizationImage || null,
+            result: finalResult,
+            context: 'manual'
+          });
+        }
+      } catch (persistErr) {
+        console.error('Failed to persist analysis to Supabase:', persistErr);
+      }
       
     } catch (error) {
       console.error('Analysis failed:', error);
@@ -250,6 +267,16 @@ export default function DiseaseDetection() {
       };
       setResults(errorResult);
       saveToHistory(errorResult, selectedImage, modelInfo);
+      try {
+        if (currentUser?.uid) {
+          await analysisSupabaseService.uploadImagesAndSave(currentUser.uid, {
+            originalImageDataUrl: selectedImage,
+            visualizationImageDataUrl: null,
+            result: errorResult,
+            context: 'manual'
+          });
+        }
+      } catch (_) {}
     } finally {
       setAnalyzing(false);
       setAnalysisProgress(0);
