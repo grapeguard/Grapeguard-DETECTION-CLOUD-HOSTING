@@ -78,18 +78,26 @@ class AnalysisSupabaseService {
     if (!firebaseUserId) return [];
     
     try {
-      const detections = await detectionService.getUserDetections(firebaseUserId, max);
+      // Query directly with user filter to ensure only user's data is returned
+      const { data: detections, error } = await supabaseData
+        .from('detections')
+        .select('*')
+        .eq('firebase_user_id', firebaseUserId)
+        .order('created_at', { ascending: false })
+        .limit(max);
+      
+      if (error) throw error;
       
       // Map to AnalysisHistory card format
-      return detections.map(detection => ({
+      return (detections || []).map(detection => ({
         id: detection.id,
         disease: detection.disease_detected,
         confidence: detection.confidence_score,
         severity: detection.severity,
         timestamp: detection.created_at,
-        visualizationImage: detection.visualizationImage || null,
+        visualizationImage: detection.visualization_image || null,
         originalImage: detection.image_url || null,
-        modelType: detection.modelType || 'AI (HF Space)',
+        modelType: detection.model_type || 'AI (HF Space)',
         type: detection.type,
         camera: detection.camera
       }));
