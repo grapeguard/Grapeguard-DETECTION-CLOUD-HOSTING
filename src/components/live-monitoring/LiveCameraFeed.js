@@ -58,10 +58,7 @@ export default function LiveCameraFeed() {
   const [modelError, setModelError] = useState(null);
   const [error, setError] = useState(null);
   
-  const [cameraResults, setCameraResults] = useState({
-    camera1: null,
-    camera2: null
-  });
+  const [cameraResults, setCameraResults] = useState({ camera1: null, camera2: null });
   
   const [detectionHistory, setDetectionHistory] = useState([]);
 
@@ -150,7 +147,7 @@ export default function LiveCameraFeed() {
   const loadCloudHistory = async (uid) => {
     try {
       if (!uid) { setDetectionHistory([]); return; }
-      const items = await analysisSupabaseService.listUserAnalyses(uid, 20, { type: 'live' });
+      const items = await analysisSupabaseService.listLiveDetections(uid, 20);
       setDetectionHistory(items.map(it => ({
         id: it.id,
         historyId: `sb_${it.id}`,
@@ -163,7 +160,8 @@ export default function LiveCameraFeed() {
           severity: it.severity,
           detectedRegions: it.detectedRegions || 0
         },
-        timestamp: it.timestamp
+        timestamp: it.timestamp,
+        driveUploadTime: it.drive_created_at || it.timestamp
       })));
     } catch (e) {
       console.error('Failed to load Supabase live history:', e);
@@ -172,46 +170,44 @@ export default function LiveCameraFeed() {
 
   useEffect(() => { loadCloudHistory(currentUser?.uid); }, [currentUser?.uid]);
 
-  const saveToHistory = (results) => {
-    try {
-      const newHistoryItems = [];
-      
-      if (results.camera1) {
-        newHistoryItems.push({
-          ...results.camera1,
-          historyId: `history_${results.camera1.id}_${Date.now()}`,
-          driveUploadTime: results.camera1.imageData?.createdTime || results.camera1.timestamp,
-          driveFileName: results.camera1.imageData?.name || `camera1_${Date.now()}.jpg`
-        });
-      }
-      
-      if (results.camera2) {
-        newHistoryItems.push({
-          ...results.camera2,
-          historyId: `history_${results.camera2.id}_${Date.now() + 1}`,
-          driveUploadTime: results.camera2.imageData?.createdTime || results.camera2.timestamp,
-          driveFileName: results.camera2.imageData?.name || `camera2_${Date.now()}.jpg`
-        });
-      }
-      
-      const updatedHistory = [...newHistoryItems, ...detectionHistory];
-      setDetectionHistory(updatedHistory);
-      localStorage.setItem('liveDetectionHistory', JSON.stringify(updatedHistory));
-      
-      console.log('💾 Saved to history:', newHistoryItems.length, 'new items, total:', updatedHistory.length);
-      
-    } catch (error) {
-      console.error('Failed to save detection history:', error);
-    }
-  };
+  // Poll latest per camera every 60s and on mount
+  useEffect(() => {
+    let intervalId;
+    const fetchLatest = async () => {
+      if (!currentUser?.uid) { setCameraResults({ camera1: null, camera2: null }); return; }
+      const latest = await analysisSupabaseService.getLatestLivePerCamera(currentUser.uid);
+      const mapToCard = (it) => !it ? null : ({
+        id: it.id,
+        camera: it.camera,
+        imageName: it.drive_file_id || `camera${it.camera}.jpg`,
+        originalImage: it.originalImage,
+        visualizationImage: it.visualizationImage,
+        detection: {
+          disease: it.disease,
+          confidence: it.confidence,
+          severity: it.severity,
+          detectedRegions: 0
+        },
+        timestamp: it.timestamp,
+        driveUploadTime: it.drive_created_at,
+        driveFileName: it.drive_file_id
+      });
+      setCameraResults({
+        camera1: mapToCard(latest.camera1),
+        camera2: mapToCard(latest.camera2)
+      });
+    };
+    fetchLatest();
+    intervalId = setInterval(fetchLatest, 60000);
+    return () => clearInterval(intervalId);
+  }, [currentUser?.uid]);
+
+  // Remove localStorage usage for live cards; history comes from cloud
+  const saveToHistory = () => {};
 
   const deleteIndividualHistory = (historyId) => {
-    const updatedHistory = detectionHistory.filter(item => 
-      (item.historyId || item.id) !== historyId
-    );
+    const updatedHistory = detectionHistory.filter(item => (item.historyId || item.id) !== historyId);
     setDetectionHistory(updatedHistory);
-    localStorage.setItem('liveDetectionHistory', JSON.stringify(updatedHistory));
-    console.log(`🗑️ Deleted history item: ${historyId}`);
   };
 
   const startAutoDetection = async () => {
@@ -380,8 +376,6 @@ export default function LiveCameraFeed() {
 
   const clearHistory = () => {
     setDetectionHistory([]);
-    localStorage.removeItem('liveDetectionHistory');
-    console.log('🗑️ Cleared detection history');
   };
 
   const downloadResult = (result) => {
