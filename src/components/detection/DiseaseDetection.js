@@ -75,22 +75,24 @@ export default function DiseaseDetection() {
 
   const { saveToHistory } = useStorageManager(analysisHistory, setAnalysisHistory);
 
-  // Load cloud history (Supabase) per user
+  // Load cloud live history (Supabase) per user with pagination
   const [cloudHistory, setCloudHistory] = useState([]);
+  const [cloudOffset, setCloudOffset] = useState(0);
+  const CLOUD_LIMIT = 10;
 
   const loadCloudHistory = async (uid) => {
     try {
       if (!uid) { setCloudHistory([]); return; }
-      const items = await analysisSupabaseService.listUserAnalyses(uid, 10);
+      const items = await analysisSupabaseService.listLiveHistory(uid, CLOUD_LIMIT, cloudOffset);
       setCloudHistory(items);
     } catch (e) {
-      console.error('Failed to load Supabase history:', e);
+      console.error('Failed to load Supabase live history:', e);
     }
   };
 
   useEffect(() => {
     loadCloudHistory(currentUser?.uid);
-  }, [currentUser?.uid]);
+  }, [currentUser?.uid, cloudOffset]);
 
   // FIXED: Custom setAnalysisHistory that automatically persists to localStorage
   const updateAnalysisHistory = (newHistory) => {
