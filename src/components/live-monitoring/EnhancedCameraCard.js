@@ -221,10 +221,15 @@ export default function EnhancedCameraCard({
             </Box>
           </Box>
 
-          {/* Disease Name Display - FIXED */}
+          {/* Disease Name with inline bold confidence */}
           <Box mb={1} p={1} style={{ backgroundColor: '#f8fafc', borderRadius: '6px' }}>
             <Typography variant="body1" style={{ fontWeight: 600, color: '#1f2937' }}>
               {diseaseNames.primary}
+              {typeof cameraData?.detection?.confidence === 'number' && (
+                <span style={{ marginLeft: '8px', fontWeight: 700, color: '#374151' }}>
+                  • {formatSensorValue(cameraData.detection.confidence, 1)}% {t('confidence')}
+                </span>
+              )}
             </Typography>
             {diseaseNames.secondary && (
               <Typography variant="body2" color="textSecondary" style={{ fontStyle: 'italic' }}>
@@ -366,7 +371,7 @@ export default function EnhancedCameraCard({
       <Dialog
         open={comparisonOpen}
         onClose={() => setComparisonOpen(false)}
-        maxWidth="lg"
+        maxWidth="md"
         fullWidth
       >
         <DialogTitle>
@@ -390,7 +395,7 @@ export default function EnhancedCameraCard({
                 alt="Original"
                 style={{
                   width: '100%',
-                  maxHeight: '400px',
+                  maxHeight: '300px',
                   objectFit: 'contain',
                   borderRadius: '8px',
                   border: '1px solid #e5e7eb'
@@ -406,7 +411,7 @@ export default function EnhancedCameraCard({
                 alt="AI Detection"
                 style={{
                   width: '100%',
-                  maxHeight: '400px',
+                  maxHeight: '300px',
                   objectFit: 'contain',
                   borderRadius: '8px',
                   border: '1px solid #e5e7eb'
