@@ -75,6 +75,23 @@ export default function DiseaseDetection() {
 
   const { saveToHistory } = useStorageManager(analysisHistory, setAnalysisHistory);
 
+  // Load cloud history (Supabase) per user
+  const [cloudHistory, setCloudHistory] = useState([]);
+
+  const loadCloudHistory = async (uid) => {
+    try {
+      if (!uid) { setCloudHistory([]); return; }
+      const items = await analysisSupabaseService.listUserAnalyses(uid, 10);
+      setCloudHistory(items);
+    } catch (e) {
+      console.error('Failed to load Supabase history:', e);
+    }
+  };
+
+  useEffect(() => {
+    loadCloudHistory(currentUser?.uid);
+  }, [currentUser?.uid]);
+
   // FIXED: Custom setAnalysisHistory that automatically persists to localStorage
   const updateAnalysisHistory = (newHistory) => {
     console.log('💾 Updating and persisting analysis history:', newHistory.length, 'items');
@@ -238,6 +255,8 @@ export default function DiseaseDetection() {
             result: finalResult,
             context: 'manual'
           });
+          // Refresh cloud history after save
+          loadCloudHistory(currentUser.uid);
         }
       } catch (persistErr) {
         console.error('Failed to persist analysis to Supabase:', persistErr);
@@ -275,6 +294,7 @@ export default function DiseaseDetection() {
             result: errorResult,
             context: 'manual'
           });
+          loadCloudHistory(currentUser.uid);
         }
       } catch (_) {}
     } finally {
@@ -439,11 +459,11 @@ export default function DiseaseDetection() {
             />
           </Box>
 
-          {/* FIXED: Use persistent analysis history with custom updater */}
+          {/* Show per-user cloud history from Supabase (no UI change) */}
           <AnalysisHistory 
-            analysisHistory={analysisHistory}
-            setAnalysisHistory={updateAnalysisHistory}
-            autoLoadFromCloud={false} // Disable cloud loading since we manage locally
+            analysisHistory={cloudHistory}
+            setAnalysisHistory={setCloudHistory}
+            autoLoadFromCloud={false}
           />
         </>
       ) : (
