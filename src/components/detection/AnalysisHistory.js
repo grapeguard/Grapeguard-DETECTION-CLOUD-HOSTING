@@ -313,11 +313,10 @@ export default function AnalysisHistory({
                         {formatSensorValue(item.confidence, 1)}% {t('confidence')}
                       </Typography>
                       
-                      <Typography variant="caption" color="textSecondary" style={{ display: 'block', marginBottom: '0.5rem', fontStyle: 'italic' }}>
+                      <Typography variant="caption" color="textSecondary" style={{ display: 'block', marginBottom: '0.25rem', fontStyle: 'italic' }}>
                         🤖 {t('analyzed')}: {formatAnalysisTime(item.timestamp)}
                       </Typography>
-                      
-                      <Box display="flex" gap={0.5} flexWrap="wrap" style={{ marginTop: '0.25rem' }}>
+                      <Box display="flex" gap={0.5} flexWrap="wrap" style={{ marginTop: '0' }}>
                         {/* Use translated severity label */}
                         <Chip
                           label={getSeverityLabel(item.severity)}
