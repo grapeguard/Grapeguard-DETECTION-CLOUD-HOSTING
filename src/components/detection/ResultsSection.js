@@ -146,6 +146,11 @@ export default function ResultsSection({
               >
                 <Typography variant="subtitle1" style={{ fontWeight: 600, marginBottom: '0.25rem' }}>
                   {results.disease}
+                  {typeof results.confidence === 'number' && (
+                    <span style={{ marginLeft: '0.5rem', fontWeight: 500, color: '#6b7280' }}>
+                      • {formatSensorValue(results.confidence || 0, 1)}% {t('confidence')}
+                    </span>
+                  )}
                 </Typography>
                 {results.marathi && (
                   <Typography variant="body2" style={{ fontStyle: 'italic', color: '#059669', marginTop: '0.25rem' }}>
@@ -178,24 +183,7 @@ export default function ResultsSection({
                 </Box>
               )}
 
-              {/* SIMPLIFIED: Only show AI Confidence - removed regions and healthy area */}
-              <Box style={{ 
-                backgroundColor: '#eff6ff', 
-                padding: '1.5rem', 
-                borderRadius: '8px', 
-                textAlign: 'center' 
-              }}>
-                <Typography variant="h4" style={{ 
-                  fontWeight: 'bold', 
-                  color: '#3b82f6',
-                  marginBottom: '0.5rem'
-                }}>
-                  {formatSensorValue(results.confidence || 0, 1)}%
-                </Typography>
-                <Typography variant="body2" color="textSecondary" style={{ fontWeight: 600 }}>
-                  {t('aiConfidence')}
-                </Typography>
-              </Box>
+              {/* Confidence box removed per request */}
 
               {/* Treatment Recommendations with proper translations */}
               <Box style={{ flex: 1 }}>
@@ -229,7 +217,7 @@ export default function ResultsSection({
       <Dialog
         open={imageComparisonOpen}
         onClose={handleCloseDialog}
-        maxWidth="lg"
+        maxWidth="md"
         fullWidth
       >
         <DialogTitle>
@@ -252,7 +240,7 @@ export default function ResultsSection({
                   alt="Original"
                   style={{
                     width: '100%',
-                    maxHeight: '400px',
+                    maxHeight: '300px',
                     objectFit: 'contain',
                     borderRadius: '8px',
                     border: '1px solid #e5e7eb'
@@ -269,7 +257,7 @@ export default function ResultsSection({
                     alt="AI Analysis"
                     style={{
                       width: '100%',
-                      maxHeight: '400px',
+                      maxHeight: '300px',
                       objectFit: 'contain',
                       borderRadius: '8px',
                       border: '1px solid #e5e7eb'
@@ -279,7 +267,7 @@ export default function ResultsSection({
                   <Box
                     style={{
                       width: '100%',
-                      height: '400px',
+                    height: '300px',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
