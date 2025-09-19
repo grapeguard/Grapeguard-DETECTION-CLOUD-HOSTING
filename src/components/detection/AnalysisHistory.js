@@ -221,14 +221,14 @@ export default function AnalysisHistory({
                     </Box>
 
                     <CardContent style={{ padding: '1rem' }}>
-                      {/* Image Preview Box - Show ACTUAL result images */}
+                      {/* Image Preview Box - prefer visualization image, tighten spacing above chips */}
                       <Box 
                         style={{
                           width: '100%',
                           height: '120px',
                           backgroundColor: '#f3f4f6',
                           borderRadius: '6px',
-                          marginBottom: '0.5rem',
+                          marginBottom: '0.25rem',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
@@ -317,7 +317,7 @@ export default function AnalysisHistory({
                         🤖 {t('analyzed')}: {formatAnalysisTime(item.timestamp)}
                       </Typography>
                       
-                      <Box display="flex" gap={0.5} flexWrap="wrap">
+                      <Box display="flex" gap={0.5} flexWrap="wrap" style={{ marginTop: '0.25rem' }}>
                         {/* Use translated severity label */}
                         <Chip
                           label={getSeverityLabel(item.severity)}
