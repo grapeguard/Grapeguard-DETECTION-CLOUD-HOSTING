@@ -6,7 +6,22 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = process.env.REACT_APP_SUPABASE_URL;
 const supabaseKey = process.env.REACT_APP_SUPABASE_ANON_KEY;
 
-export const supabaseData = createClient(supabaseUrl || '', supabaseKey || '', {
+function assertSupabaseEnv() {
+  if (!supabaseUrl || !/^https?:\/\//.test(supabaseUrl)) {
+    throw new Error(
+      'Missing or invalid REACT_APP_SUPABASE_URL. Set a valid https URL from your Supabase project settings.'
+    );
+  }
+  if (!supabaseKey) {
+    throw new Error(
+      'Missing REACT_APP_SUPABASE_ANON_KEY. Add your Supabase anon public API key.'
+    );
+  }
+}
+
+assertSupabaseEnv();
+
+export const supabaseData = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: false } // We use Firebase for auth
 });
 
@@ -22,6 +37,12 @@ export const detectionService = {
         image_path: detectionData.image_path,
         disease_detected: detectionData.disease,
         confidence_score: detectionData.confidence,
+        severity: detectionData.severity || null,
+        detected_regions: detectionData.detectedRegions ?? null,
+        healthy_area: detectionData.healthyArea ?? null,
+        camera: detectionData.camera ?? null,
+        model_type: detectionData.modelType || null,
+        visualization_image: detectionData.visualizationImage || null,
         analysis_result: detectionData,
         status: 'completed'
       }])
