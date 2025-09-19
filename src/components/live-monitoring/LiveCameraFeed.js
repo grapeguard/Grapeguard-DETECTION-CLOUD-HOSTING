@@ -641,9 +641,10 @@ export default function LiveCameraFeed() {
                           </Box>
                         </Box>
                         
-                        {/* Disease Name Display - EXACT MATCH to Detection History Format */}
-                        <Typography variant="body2" style={{ fontWeight: 600, marginBottom: '0.25rem', color: '#1f2937' }}>
-                          {diseaseNames.primary}
+                        {/* Disease name with inline confidence */}
+                        <Typography variant="body2" style={{ fontWeight: 600, marginBottom: '0.25rem', color: '#1f2937', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span>{diseaseNames.primary}</span>
+                          <span style={{ color: '#6b7280', fontWeight: 500 }}>• {formatSensorValue(result.detection.confidence, 1)}% {t('confidence')}</span>
                         </Typography>
                         {diseaseNames.secondary && (
                           <Typography variant="caption" color="textSecondary" style={{ display: 'block', marginBottom: '0.25rem', fontStyle: 'italic' }}>
@@ -651,9 +652,9 @@ export default function LiveCameraFeed() {
                           </Typography>
                         )}
                         
-                        {/* Camera and Confidence - EXACT format from image */}
+                        {/* Camera only (confidence moved up) */}
                         <Typography variant="caption" color="textSecondary" style={{ display: 'block', marginBottom: '0.25rem' }}>
-                          {t('camera')} {result.camera} • {formatSensorValue(result.detection.confidence, 1)}% {t('confidence')}
+                          {t('camera')} {result.camera}
                         </Typography>
                         
                         {/* Drive Upload Time - EXACT format from image */}
