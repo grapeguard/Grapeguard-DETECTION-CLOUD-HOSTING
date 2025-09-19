@@ -146,19 +146,31 @@ export default function LiveCameraFeed() {
     initModel();
   }, [detectionService]);
 
-  // Load detection history from localStorage
-  useEffect(() => {
+  // Load per-user live detection history from Supabase
+  const loadCloudHistory = async (uid) => {
     try {
-      const saved = localStorage.getItem('liveDetectionHistory');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        setDetectionHistory(parsed);
-        console.log('📜 Loaded history:', parsed.length, 'items');
-      }
-    } catch (error) {
-      console.error('Failed to load detection history:', error);
+      if (!uid) { setDetectionHistory([]); return; }
+      const items = await analysisSupabaseService.listUserAnalyses(uid, 20, { type: 'live' });
+      setDetectionHistory(items.map(it => ({
+        id: it.id,
+        historyId: `sb_${it.id}`,
+        camera: it.camera,
+        originalImage: it.originalImage,
+        visualizationImage: it.visualizationImage,
+        detection: {
+          disease: it.disease,
+          confidence: it.confidence,
+          severity: it.severity,
+          detectedRegions: it.detectedRegions || 0
+        },
+        timestamp: it.timestamp
+      })));
+    } catch (e) {
+      console.error('Failed to load Supabase live history:', e);
     }
-  }, []);
+  };
+
+  useEffect(() => { loadCloudHistory(currentUser?.uid); }, [currentUser?.uid]);
 
   const saveToHistory = (results) => {
     try {
@@ -284,6 +296,8 @@ export default function LiveCameraFeed() {
             );
           }
           await Promise.allSettled(tasks);
+          // Refresh cloud history
+          loadCloudHistory(currentUser.uid);
         }
       } catch (persistErr) {
         console.error('Failed to persist live results to Supabase:', persistErr);
