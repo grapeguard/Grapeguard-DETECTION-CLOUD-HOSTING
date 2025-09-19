@@ -358,24 +358,7 @@ export default function EnhancedCameraCard({
             </Box>
           </Box>
 
-          {/* SIMPLIFIED Statistics - Only AI Confidence */}
-          <Box style={{ 
-            backgroundColor: '#eff6ff', 
-            padding: '1rem', 
-            borderRadius: '6px', 
-            textAlign: 'center' 
-          }}>
-            <Typography variant="h4" style={{ 
-              fontWeight: 'bold', 
-              color: '#3b82f6',
-              marginBottom: '0.5rem'
-            }}>
-              {formatSensorValue(cameraData.detection?.confidence || 0, 1)}%
-            </Typography>
-            <Typography variant="body2" color="textSecondary" style={{ fontWeight: 600 }}>
-              {t('aiConfidence')}
-            </Typography>
-          </Box>
+          {/* Confidence box removed; move confidence beside disease name below */}
         </CardContent>
       </Card>
 
