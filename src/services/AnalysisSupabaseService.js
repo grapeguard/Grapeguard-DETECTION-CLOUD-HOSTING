@@ -70,21 +70,33 @@ class AnalysisSupabaseService {
 
     } catch (error) {
       console.error('Supabase upload/save failed:', error);
+      console.error('Error details:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint
+      });
       throw error;
     }
   }
 
-  async listUserAnalyses(firebaseUserId, max = 20) {
+  async listUserAnalyses(firebaseUserId, max = 20, options = {}) {
     if (!firebaseUserId) return [];
     
     try {
       // Query directly with user filter to ensure only user's data is returned
-      const { data: detections, error } = await supabaseData
+      let query = supabaseData
         .from('detections')
         .select('*')
         .eq('firebase_user_id', firebaseUserId)
         .order('created_at', { ascending: false })
         .limit(max);
+
+      if (options.type) {
+        query = query.eq('type', options.type);
+      }
+
+      const { data: detections, error } = await query;
       
       if (error) throw error;
       
