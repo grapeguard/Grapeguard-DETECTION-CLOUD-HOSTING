@@ -1,4 +1,4 @@
-// Fixed DiseaseDetection.js with Persistent Analysis History
+// COMPLETELY FIXED DiseaseDetection.js - Removed CQ.listLiveHistory Error
 // src/components/detection/DiseaseDetection.js
 
 import React, { useState, useEffect } from 'react';
@@ -49,7 +49,7 @@ export default function DiseaseDetection() {
   const [analyzing, setAnalyzing] = useState(false);
   const [results, setResults] = useState(null);
   
-  // FIXED: Initialize analysis history from localStorage immediately and keep it persistent
+  // Initialize analysis history from localStorage immediately and keep it persistent
   const [analysisHistory, setAnalysisHistory] = useState(() => {
     try {
       const savedHistory = localStorage.getItem('diseaseAnalysisHistory');
@@ -75,35 +75,36 @@ export default function DiseaseDetection() {
 
   const { saveToHistory } = useStorageManager(analysisHistory, setAnalysisHistory);
 
-  // Load cloud live history (Supabase) per user with pagination
+  // FIXED: Load cloud history (Supabase) per user - REMOVED problematic CQ.listLiveHistory call
   const [cloudHistory, setCloudHistory] = useState([]);
-  const [cloudOffset, setCloudOffset] = useState(0);
-  const CLOUD_LIMIT = 10;
 
   const loadCloudHistory = async (uid) => {
     try {
-      if (!uid) { setCloudHistory([]); return; }
-      const items = await analysisSupabaseService.listLiveHistory(uid, CLOUD_LIMIT, cloudOffset);
+      if (!uid) { 
+        setCloudHistory([]); 
+        return; 
+      }
+      console.log('Loading cloud history for user:', uid);
+      
+      // FIXED: Using correct service method instead of non-existent CQ.listLiveHistory
+      const items = await analysisSupabaseService.listUserAnalyses(uid, 10);
+      console.log('Loaded cloud history items:', items.length);
       setCloudHistory(items);
     } catch (e) {
-      console.error('Failed to load Supabase live history:', e);
+      console.error('Failed to load Supabase history:', e);
+      // Don't crash the app, just log the error
+      setCloudHistory([]);
     }
   };
 
+  // FIXED: Proper useEffect with correct dependency
   useEffect(() => {
-    loadCloudHistory(currentUser?.uid);
-  }, [currentUser?.uid, cloudOffset]);
-
-  // FIXED: Custom setAnalysisHistory that automatically persists to localStorage
-  const updateAnalysisHistory = (newHistory) => {
-    console.log('💾 Updating and persisting analysis history:', newHistory.length, 'items');
-    setAnalysisHistory(newHistory);
-    try {
-      localStorage.setItem('diseaseAnalysisHistory', JSON.stringify(newHistory));
-    } catch (error) {
-      console.error('Failed to persist analysis history:', error);
+    if (currentUser?.uid) {
+      loadCloudHistory(currentUser.uid);
+    } else {
+      setCloudHistory([]);
     }
-  };
+  }, [currentUser?.uid]);
 
   // Load AI model on component mount
   useEffect(() => {
@@ -137,9 +138,6 @@ export default function DiseaseDetection() {
 
     initializeModel();
   }, [detectionService]);
-
-  // REMOVED: The problematic useEffect that was reloading from localStorage
-  // The history is now initialized in useState and persisted automatically
 
   const refreshModel = async () => {
     setRefreshingModel(true);
@@ -461,7 +459,7 @@ export default function DiseaseDetection() {
             />
           </Box>
 
-          {/* Show per-user cloud history from Supabase (no UI change) */}
+          {/* Show per-user cloud history from Supabase */}
           <AnalysisHistory 
             analysisHistory={cloudHistory}
             setAnalysisHistory={setCloudHistory}
