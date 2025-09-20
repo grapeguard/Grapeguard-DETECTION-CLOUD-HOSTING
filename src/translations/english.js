@@ -424,6 +424,11 @@ export const englishTranslations = {
   
   // Loading and basic states
   loadingAlerts: "Loading alerts...",
+  loading: "Loading...",
+  showMore: "Show More",
+  liveMonitoringActive: "Live Monitoring Active",
+  noLiveImagesYet: "No Live Images Yet",
+  liveImagesWillAppearHere: "Live images from your cameras will appear here",
   unknownTime: "Unknown time",
   noTimestamp: "No timestamp available",
   invalidTime: "Invalid time", 
