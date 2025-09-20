@@ -16,24 +16,16 @@ import {
   Tooltip
 } from '@mui/material';
 import {
-  PlayArrow as PlayIcon,
   Clear as ClearIcon,
-  Psychology as AIIcon,
   Camera as CameraIcon,
-  CheckCircle as CheckCircleIcon,
-  Error as ErrorIcon,
   Delete as DeleteIcon
 } from '@mui/icons-material';
 import { useTranslation } from '../../context/LanguageContext';
-import GoogleDriveService from '../../services/GoogleDriveService';
-import DetectronDiseaseService from '../../services/DetectronDiseaseService';
 import EnhancedCameraCard from './EnhancedCameraCard';
 import { useAuth } from '../../context/AuthContext';
 import analysisSupabaseService from '../../services/AnalysisSupabaseService';
 
 export default function LiveCameraFeed() {
-  const [driveService] = useState(new GoogleDriveService());
-  const [detectionService] = useState(new DetectronDiseaseService());
   const { t, language, formatSensorValue } = useTranslation();
   const { currentUser } = useAuth();
   
@@ -53,14 +45,16 @@ export default function LiveCameraFeed() {
     }
   };
   
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isModelLoaded, setIsModelLoaded] = useState(false);
-  const [modelError, setModelError] = useState(null);
   const [error, setError] = useState(null);
   
-  const [cameraResults, setCameraResults] = useState({ camera1: null, camera2: null });
+  const [cameraResults, setCameraResults] = useState({
+    camera1: null,
+    camera2: null
+  });
   
   const [detectionHistory, setDetectionHistory] = useState([]);
+  const [showMoreOffset, setShowMoreOffset] = useState(0);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   // Disease name mapping with multilingual support
   const getDiseaseDisplayName = (disease, currentLanguage) => {
@@ -116,38 +110,19 @@ export default function LiveCameraFeed() {
     }
   };
 
-  // Load AI model on component mount
-  useEffect(() => {
-    const initModel = async () => {
-      try {
-        console.log('🤖 Loading AI model (HF Space)...');
-        setModelError(null);
-        
-        const loaded = await detectionService.loadModel();
-        setIsModelLoaded(loaded);
-        
-        if (!loaded) {
-          setModelError('AI service unavailable. Please check your internet and try again.');
-          console.error('❌ AI model failed to load');
-        } else {
-          console.log('✅ AI model loaded successfully');
-        }
-        
-      } catch (error) {
-        console.error('❌ Model loading failed:', error);
-        setModelError(`Service connection failed: ${error.message}`);
-        setIsModelLoaded(false);
-      }
-    };
+  // Removed AI model loading - no longer needed
 
-    initModel();
-  }, [detectionService]);
-
-  // Load per-user live detection history from Supabase
-  const loadCloudHistory = async (uid) => {
+  // Load latest live monitoring images from Supabase
+  const loadLatestImages = async (uid) => {
     try {
-      if (!uid) { setDetectionHistory([]); return; }
-      const items = await analysisSupabaseService.listLiveDetections(uid, 20);
+      if (!uid) { 
+        setDetectionHistory([]); 
+        setCameraResults({ camera1: null, camera2: null });
+        return; 
+      }
+      
+      // Load 10 latest images for history
+      const items = await analysisSupabaseService.getLatestLiveImages(uid, 10);
       setDetectionHistory(items.map(it => ({
         id: it.id,
         historyId: `sb_${it.id}`,
@@ -155,218 +130,66 @@ export default function LiveCameraFeed() {
         originalImage: it.originalImage,
         visualizationImage: it.visualizationImage,
         detection: {
-          disease: it.disease,
-          confidence: it.confidence,
-          severity: it.severity,
-          detectedRegions: it.detectedRegions || 0
+          disease: it.detection.disease,
+          confidence: it.detection.confidence,
+          severity: it.detection.severity,
+          detectedRegions: it.detection.detectedRegions || 0
         },
         timestamp: it.timestamp,
-        driveUploadTime: it.drive_created_at || it.timestamp
+        driveFileName: it.driveFileName,
+        driveUploadTime: it.driveUploadTime
       })));
+
+      // Load latest image for each camera
+      const [camera1Image, camera2Image] = await Promise.all([
+        analysisSupabaseService.getLatestImageByCamera(uid, 1),
+        analysisSupabaseService.getLatestImageByCamera(uid, 2)
+      ]);
+
+      setCameraResults({
+        camera1: camera1Image ? {
+          id: camera1Image.id,
+          camera: camera1Image.camera,
+          originalImage: camera1Image.originalImage,
+          visualizationImage: camera1Image.visualizationImage,
+          detection: camera1Image.detection,
+          timestamp: camera1Image.timestamp,
+          driveFileName: camera1Image.driveFileName,
+          driveUploadTime: camera1Image.driveUploadTime
+        } : null,
+        camera2: camera2Image ? {
+          id: camera2Image.id,
+          camera: camera2Image.camera,
+          originalImage: camera2Image.originalImage,
+          visualizationImage: camera2Image.visualizationImage,
+          detection: camera2Image.detection,
+          timestamp: camera2Image.timestamp,
+          driveFileName: camera2Image.driveFileName,
+          driveUploadTime: camera2Image.driveUploadTime
+        } : null
+      });
+
     } catch (e) {
-      console.error('Failed to load Supabase live history:', e);
+      console.error('Failed to load latest live images:', e);
     }
   };
 
-  useEffect(() => { loadCloudHistory(currentUser?.uid); }, [currentUser?.uid]);
+  useEffect(() => { loadLatestImages(currentUser?.uid); }, [currentUser?.uid]);
 
-  // Poll latest per camera every 60s and on mount
-  useEffect(() => {
-    let intervalId;
-    const fetchLatest = async () => {
-      if (!currentUser?.uid) { setCameraResults({ camera1: null, camera2: null }); return; }
-      const latest = await analysisSupabaseService.getLatestLivePerCamera(currentUser.uid);
-      const mapToCard = (it) => !it ? null : ({
-        id: it.id,
-        camera: it.camera,
-        imageName: it.drive_file_id || `camera${it.camera}.jpg`,
-        originalImage: it.originalImage,
-        visualizationImage: it.visualizationImage,
-        detection: {
-          disease: it.disease,
-          confidence: it.confidence,
-          severity: it.severity,
-          detectedRegions: 0
-        },
-        timestamp: it.timestamp,
-        driveUploadTime: it.drive_created_at,
-        driveFileName: it.drive_file_id
-      });
-      setCameraResults({
-        camera1: mapToCard(latest.camera1),
-        camera2: mapToCard(latest.camera2)
-      });
-    };
-    fetchLatest();
-    intervalId = setInterval(fetchLatest, 60000);
-    return () => clearInterval(intervalId);
-  }, [currentUser?.uid]);
-
-  // Remove localStorage usage for live cards; history comes from cloud
-  const saveToHistory = () => {};
+  // Removed saveToHistory function - no longer needed
 
   const deleteIndividualHistory = (historyId) => {
-    const updatedHistory = detectionHistory.filter(item => (item.historyId || item.id) !== historyId);
+    const updatedHistory = detectionHistory.filter(item => 
+      (item.historyId || item.id) !== historyId
+    );
     setDetectionHistory(updatedHistory);
+    localStorage.setItem('liveDetectionHistory', JSON.stringify(updatedHistory));
+    console.log(`🗑️ Deleted history item: ${historyId}`);
   };
 
-  const startAutoDetection = async () => {
-    if (!isModelLoaded) {
-      setError('AI model not loaded. Please check your internet and refresh the page.');
-      return;
-    }
+  // Removed startAutoDetection function - no longer needed
 
-    if (modelError) {
-      setError('Cannot process: ' + modelError);
-      return;
-    }
-
-    setIsProcessing(true);
-    setError(null);
-
-    try {
-      console.log('🚀 Starting Auto Detection through Camera...');
-      
-      const images = await driveService.getLatestCameraImages();
-      
-      if (!images.camera1 && !images.camera2) {
-        throw new Error('No camera images found. Make sure ESP32-CAM is uploading images.');
-      }
-      
-      let camera1Result = null;
-      if (images.camera1) {
-        console.log(`🔬 Processing Camera 1: ${images.camera1.name}`);
-        camera1Result = await processImage(images.camera1, 1);
-      }
-      
-      let camera2Result = null;
-      if (images.camera2) {
-        console.log(`🔬 Processing Camera 2: ${images.camera2.name}`);
-        camera2Result = await processImage(images.camera2, 2);
-      }
-      
-      const results = {
-        camera1: camera1Result,
-        camera2: camera2Result
-      };
-      
-      
-      setCameraResults(results);
-      saveToHistory(results);
-      // Persist each result to Supabase (Storage + Database)
-      try {
-        if (currentUser?.uid) {
-          const tasks = [];
-          if (camera1Result) {
-            tasks.push(
-              analysisSupabaseService.uploadImagesAndSave(currentUser.uid, {
-                originalImageDataUrl: camera1Result.originalImage,
-                visualizationImageDataUrl: camera1Result.visualizationImage,
-                result: {
-                  disease: camera1Result.detection?.disease,
-                  confidence: camera1Result.detection?.confidence,
-                  severity: camera1Result.detection?.severity,
-                  detectedRegions: camera1Result.detection?.detectedRegions,
-                  modelType: camera1Result.modelType
-                },
-                context: 'live',
-                camera: 1
-              })
-            );
-          }
-          if (camera2Result) {
-            tasks.push(
-              analysisSupabaseService.uploadImagesAndSave(currentUser.uid, {
-                originalImageDataUrl: camera2Result.originalImage,
-                visualizationImageDataUrl: camera2Result.visualizationImage,
-                result: {
-                  disease: camera2Result.detection?.disease,
-                  confidence: camera2Result.detection?.confidence,
-                  severity: camera2Result.detection?.severity,
-                  detectedRegions: camera2Result.detection?.detectedRegions,
-                  modelType: camera2Result.modelType
-                },
-                context: 'live',
-                camera: 2
-              })
-            );
-          }
-          await Promise.allSettled(tasks);
-          // Refresh cloud history
-          loadCloudHistory(currentUser.uid);
-        }
-      } catch (persistErr) {
-        console.error('Failed to persist live results to Supabase:', persistErr);
-      }
-      
-      console.log('🎉 Auto detection completed successfully!');
-      
-    } catch (error) {
-      console.error('❌ Auto detection failed:', error);
-      setError(`Detection failed: ${error.message}`);
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const processImage = async (imageData, cameraNumber) => {
-    const startTime = Date.now();
-    
-    try {
-      console.log(`🤖 Running AI detection on Camera ${cameraNumber}...`);
-      
-      const imageDataUrl = await driveService.getImageAsDataUrl(imageData);
-      const img = new Image();
-      
-      const detectionResult = await new Promise((resolve, reject) => {
-        img.onload = async () => {
-          try {
-            console.log(`🔬 Image loaded, running AI prediction...`);
-            const result = await detectionService.predict(img, true);
-            resolve(result);
-          } catch (error) {
-            console.error('❌ AI prediction failed:', error);
-            reject(error);
-          }
-        };
-        
-        img.onerror = () => reject(new Error('Image loading failed'));
-        img.crossOrigin = 'anonymous';
-        img.src = imageDataUrl;
-      });
-
-      const processingTime = Date.now() - startTime;
-      
-      const result = {
-        id: `real_${imageData.id}_${Date.now()}`,
-        camera: cameraNumber,
-        imageName: imageData.name,
-        imageData: imageData,
-        originalImage: imageDataUrl,
-        visualizationImage: detectionResult.visualizationImage || null,
-        detection: detectionResult,
-        timestamp: new Date().toISOString(),
-        processingTime: processingTime,
-        isRealDetectron2: false,
-        modelType: 'AI (HF Space)',
-        driveUploadTime: imageData.createdTime,
-        driveFileName: imageData.name
-      };
-      
-      console.log(`🎯 Camera ${cameraNumber} processed in ${processingTime}ms:`, {
-        disease: detectionResult.disease,
-        confidence: detectionResult.confidence,
-        severity: detectionResult.severity,
-        driveUploadTime: imageData.createdTime
-      });
-      
-      return result;
-      
-    } catch (error) {
-      console.error(`❌ Processing failed for Camera ${cameraNumber}:`, error);
-      throw error;
-    }
-  };
+  // Removed processImage function - no longer needed
 
   const clearCurrentResults = () => {
     setCameraResults({ camera1: null, camera2: null });
@@ -376,6 +199,45 @@ export default function LiveCameraFeed() {
 
   const clearHistory = () => {
     setDetectionHistory([]);
+    setShowMoreOffset(0);
+    localStorage.removeItem('liveDetectionHistory');
+    console.log('🗑️ Cleared detection history');
+  };
+
+  const loadMoreImages = async () => {
+    if (!currentUser?.uid || isLoadingMore) return;
+    
+    setIsLoadingMore(true);
+    try {
+      const newOffset = showMoreOffset + 10;
+      const moreItems = await analysisSupabaseService.getMoreLiveImages(currentUser.uid, newOffset, 10);
+      
+      if (moreItems.length > 0) {
+        const newHistoryItems = moreItems.map(it => ({
+          id: it.id,
+          historyId: `sb_${it.id}`,
+          camera: it.camera,
+          originalImage: it.originalImage,
+          visualizationImage: it.visualizationImage,
+          detection: {
+            disease: it.detection.disease,
+            confidence: it.detection.confidence,
+            severity: it.detection.severity,
+            detectedRegions: it.detection.detectedRegions || 0
+          },
+          timestamp: it.timestamp,
+          driveFileName: it.driveFileName,
+          driveUploadTime: it.driveUploadTime
+        }));
+        
+        setDetectionHistory(prev => [...prev, ...newHistoryItems]);
+        setShowMoreOffset(newOffset);
+      }
+    } catch (e) {
+      console.error('Failed to load more images:', e);
+    } finally {
+      setIsLoadingMore(false);
+    }
   };
 
   const downloadResult = (result) => {
@@ -405,24 +267,8 @@ export default function LiveCameraFeed() {
       <Box display="flex" justifyContent="space-between" alignItems="center" gap={2}>
         <Box display="flex" gap={2}>
           <Button
-            variant="contained"
-            size="large"
-            startIcon={isProcessing ? <CircularProgress size={20} color="inherit" /> : <PlayIcon />}
-            onClick={startAutoDetection}
-            disabled={isProcessing || !isModelLoaded || modelError}
-            style={{ 
-              backgroundColor: (!isModelLoaded || modelError) ? '#9ca3af' : '#22c55e', 
-              color: 'white',
-              padding: '0.75rem 2rem'
-            }}
-          >
-            {isProcessing ? t('processing') : t('autoDetectThroughCamera')}
-          </Button>
-          
-          <Button
             variant="outlined"
             onClick={clearCurrentResults}
-            disabled={isProcessing}
             startIcon={<ClearIcon />}
             style={{ borderColor: '#6b7280', color: '#6b7280' }}
             size="large"
@@ -433,15 +279,9 @@ export default function LiveCameraFeed() {
 
         <Box display="flex" alignItems="center" gap={1}>
           <Chip
-            label={t('googleDriveConnected')}
+            label={t('liveMonitoringActive')}
             color="success"
-            icon={<CheckCircleIcon />}
-            size="small"
-          />
-          <Chip
-            label={isModelLoaded ? t('aiModelReady') : (modelError ? t('aiModelFailed') : t('aiModelLoading'))}
-            color={isModelLoaded ? 'success' : (modelError ? 'error' : 'default')}
-            icon={isModelLoaded ? <AIIcon /> : (modelError ? <ErrorIcon /> : <CircularProgress size={16} />)}
+            icon={<CameraIcon />}
             size="small"
           />
         </Box>
@@ -451,18 +291,6 @@ export default function LiveCameraFeed() {
       {error && (
         <Alert severity="error" onClose={() => setError(null)}>
           {error}
-        </Alert>
-      )}
-
-      {/* Model Error Display */}
-      {modelError && (
-        <Alert severity="error" style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5' }}>
-          <Typography variant="body2">
-            <strong>{t('detectronServerError')}:</strong> {modelError}
-          </Typography>
-          <Typography variant="body2" style={{ marginTop: '0.5rem' }}>
-            Please check your internet connection and try again.
-          </Typography>
         </Alert>
       )}
 
@@ -494,26 +322,41 @@ export default function LiveCameraFeed() {
               {t('recentAnalysisHistory')} ({detectionHistory.length})
             </Typography>
             
-            {detectionHistory.length > 0 && (
-              <Button
-                onClick={clearHistory}
-                style={{ color: '#ef4444' }}
-                size="small"
-                startIcon={<DeleteIcon />}
-              >
-                {t('clearHistory')}
-              </Button>
-            )}
+            <Box display="flex" gap={1}>
+              {detectionHistory.length > 0 && (
+                <Button
+                  onClick={loadMoreImages}
+                  disabled={isLoadingMore}
+                  variant="outlined"
+                  size="small"
+                  startIcon={isLoadingMore ? <CircularProgress size={16} /> : null}
+                  style={{ borderColor: '#3b82f6', color: '#3b82f6' }}
+                >
+                  {isLoadingMore ? t('loading') : t('showMore')}
+                </Button>
+              )}
+              
+              {detectionHistory.length > 0 && (
+                <Button
+                  onClick={clearHistory}
+                  style={{ color: '#ef4444' }}
+                  size="small"
+                  startIcon={<DeleteIcon />}
+                >
+                  {t('clearHistory')}
+                </Button>
+              )}
+            </Box>
           </Box>
           
           {detectionHistory.length === 0 ? (
             <Box textAlign="center" py={3} style={{ backgroundColor: '#f9fafb', borderRadius: '8px' }}>
               <CameraIcon style={{ fontSize: '3rem', color: '#9ca3af', marginBottom: '1rem' }} />
               <Typography variant="h6" color="textSecondary" style={{ marginBottom: '0.5rem' }}>
-                {t('noAIDetectionsYet')}
+                {t('noLiveImagesYet')}
               </Typography>
               <Typography variant="body2" color="textSecondary">
-                {t('clickAutoDetect')}
+                {t('liveImagesWillAppearHere')}
               </Typography>
             </Box>
           ) : (
