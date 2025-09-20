@@ -198,6 +198,13 @@ class AnalysisSupabaseService {
       }));
     } catch (error) {
       console.error('Failed to get latest live images:', error);
+      // Fallback: return empty array if table doesn't exist yet
+      if (error.message?.includes('relation "live_monitoring_images" does not exist') || 
+          error.message?.includes('permission denied') ||
+          error.status === 406) {
+        console.warn('Live monitoring table not found or no permission. Returning empty array.');
+        return [];
+      }
       return [];
     }
   }
@@ -226,6 +233,13 @@ class AnalysisSupabaseService {
       };
     } catch (error) {
       console.error('Failed to get latest image by camera:', error);
+      // Fallback: return null if table doesn't exist yet
+      if (error.message?.includes('relation "live_monitoring_images" does not exist') || 
+          error.message?.includes('permission denied') ||
+          error.status === 406) {
+        console.warn('Live monitoring table not found or no permission. Returning null.');
+        return null;
+      }
       return null;
     }
   }
@@ -252,6 +266,13 @@ class AnalysisSupabaseService {
       }));
     } catch (error) {
       console.error('Failed to get more live images:', error);
+      // Fallback: return empty array if table doesn't exist yet
+      if (error.message?.includes('relation "live_monitoring_images" does not exist') || 
+          error.message?.includes('permission denied') ||
+          error.status === 406) {
+        console.warn('Live monitoring table not found or no permission. Returning empty array.');
+        return [];
+      }
       return [];
     }
   }
