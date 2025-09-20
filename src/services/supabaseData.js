@@ -217,53 +217,71 @@ export const liveMonitoringService = {
   },
 
   async getLatestImages(firebaseUserId, limit = 10, cameraNumber = null) {
-    let query = supabaseData
-      .from('live_monitoring_images')
-      .select('*')
-      .eq('firebase_user_id', firebaseUserId)
-      .order('created_at', { ascending: false })
-      .limit(limit);
+    try {
+      let query = supabaseData
+        .from('live_monitoring_images')
+        .select('*')
+        .eq('firebase_user_id', firebaseUserId)
+        .order('created_at', { ascending: false })
+        .limit(limit);
 
-    if (cameraNumber) {
-      query = query.eq('camera_number', cameraNumber);
+      if (cameraNumber) {
+        query = query.eq('camera_number', cameraNumber);
+      }
+
+      const { data, error } = await query;
+      
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Error in getLatestImages:', error);
+      // Return empty array if table doesn't exist or permission denied
+      return [];
     }
-
-    const { data, error } = await query;
-    
-    if (error) throw error;
-    return data || [];
   },
 
   async getLatestImageByCamera(firebaseUserId, cameraNumber) {
-    const { data, error } = await supabaseData
-      .from('live_monitoring_images')
-      .select('*')
-      .eq('firebase_user_id', firebaseUserId)
-      .eq('camera_number', cameraNumber)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single();
-    
-    if (error && error.code !== 'PGRST116') throw error; // PGRST116 = no rows returned
-    return data;
+    try {
+      const { data, error } = await supabaseData
+        .from('live_monitoring_images')
+        .select('*')
+        .eq('firebase_user_id', firebaseUserId)
+        .eq('camera_number', cameraNumber)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      
+      if (error && error.code !== 'PGRST116') throw error; // PGRST116 = no rows returned
+      return data;
+    } catch (error) {
+      console.error('Error in getLatestImageByCamera:', error);
+      // Return null if table doesn't exist or permission denied
+      return null;
+    }
   },
 
   async getMoreImages(firebaseUserId, offset = 0, limit = 10, cameraNumber = null) {
-    let query = supabaseData
-      .from('live_monitoring_images')
-      .select('*')
-      .eq('firebase_user_id', firebaseUserId)
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
+    try {
+      let query = supabaseData
+        .from('live_monitoring_images')
+        .select('*')
+        .eq('firebase_user_id', firebaseUserId)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + limit - 1);
 
-    if (cameraNumber) {
-      query = query.eq('camera_number', cameraNumber);
+      if (cameraNumber) {
+        query = query.eq('camera_number', cameraNumber);
+      }
+
+      const { data, error } = await query;
+      
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Error in getMoreImages:', error);
+      // Return empty array if table doesn't exist or permission denied
+      return [];
     }
-
-    const { data, error } = await query;
-    
-    if (error) throw error;
-    return data || [];
   }
 };
 
