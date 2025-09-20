@@ -188,6 +188,85 @@ export const analysisService = {
   }
 };
 
+// Live monitoring operations
+export const liveMonitoringService = {
+  async saveLiveImage(firebaseUserId, imageData) {
+    const { data, error } = await supabaseData
+      .from('live_monitoring_images')
+      .insert([{
+        firebase_user_id: firebaseUserId,
+        camera_number: imageData.cameraNumber,
+        image_url: imageData.imageUrl,
+        image_path: imageData.imagePath,
+        analysis_result: imageData.analysisResult || null,
+        disease_detected: imageData.disease || null,
+        confidence_score: imageData.confidence || null,
+        severity: imageData.severity || null,
+        detected_regions: imageData.detectedRegions || 0,
+        model_type: imageData.modelType || 'AI (HF Space)',
+        visualization_image: imageData.visualizationImage || null,
+        drive_file_name: imageData.driveFileName || null,
+        drive_upload_time: imageData.driveUploadTime || null,
+        status: 'completed'
+      }])
+      .select()
+      .single();
+    
+    if (error) throw error;
+    return data;
+  },
+
+  async getLatestImages(firebaseUserId, limit = 10, cameraNumber = null) {
+    let query = supabaseData
+      .from('live_monitoring_images')
+      .select('*')
+      .eq('firebase_user_id', firebaseUserId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (cameraNumber) {
+      query = query.eq('camera_number', cameraNumber);
+    }
+
+    const { data, error } = await query;
+    
+    if (error) throw error;
+    return data || [];
+  },
+
+  async getLatestImageByCamera(firebaseUserId, cameraNumber) {
+    const { data, error } = await supabaseData
+      .from('live_monitoring_images')
+      .select('*')
+      .eq('firebase_user_id', firebaseUserId)
+      .eq('camera_number', cameraNumber)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+    
+    if (error && error.code !== 'PGRST116') throw error; // PGRST116 = no rows returned
+    return data;
+  },
+
+  async getMoreImages(firebaseUserId, offset = 0, limit = 10, cameraNumber = null) {
+    let query = supabaseData
+      .from('live_monitoring_images')
+      .select('*')
+      .eq('firebase_user_id', firebaseUserId)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (cameraNumber) {
+      query = query.eq('camera_number', cameraNumber);
+    }
+
+    const { data, error } = await query;
+    
+    if (error) throw error;
+    return data || [];
+  }
+};
+
 // Helper function to upload images to Supabase storage
 export async function uploadImage(file, bucket = 'grapeguard-images', folder = 'detections') {
   try {
