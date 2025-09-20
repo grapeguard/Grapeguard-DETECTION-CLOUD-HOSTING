@@ -238,3 +238,118 @@ export const liveMonitoringService = {
       .from('live_monitoring_images')
       .select('*')
       .eq('firebase_user_id', firebaseUserId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (cameraNumber) {
+      query = query.eq('camera_number', cameraNumber);
+    }
+
+    const { data: images, error: queryError } = await query;
+    
+    if (queryError) {
+      console.error('Query error:', queryError);
+      throw queryError;
+    }
+    
+    console.log('Retrieved images:', images);
+    return images || [];
+  },
+
+  async getLatestImageByCamera(firebaseUserId, cameraNumber) {
+    console.log('Getting latest image by camera:', { firebaseUserId, cameraNumber });
+    
+    // FIXED: Set user context for RLS policies
+    const { data, error } = await supabaseData.rpc('set_claim', {
+      claim: 'sub', 
+      value: firebaseUserId
+    });
+
+    if (error) {
+      console.warn('Could not set user context:', error);
+    }
+
+    const { data: image, error: queryError } = await supabaseData
+      .from('live_monitoring_images')
+      .select('*')
+      .eq('firebase_user_id', firebaseUserId)
+      .eq('camera_number', cameraNumber)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(); // FIXED: Use maybeSingle() instead of single() to avoid error when no rows
+    
+    if (queryError) {
+      console.error('Query error:', queryError);
+      throw queryError;
+    }
+    
+    console.log('Retrieved camera image:', image);
+    return image;
+  },
+
+  async getMoreImages(firebaseUserId, offset = 0, limit = 10, cameraNumber = null) {
+    console.log('Getting more images:', { firebaseUserId, offset, limit, cameraNumber });
+    
+    // FIXED: Set user context for RLS policies  
+    const { data, error } = await supabaseData.rpc('set_claim', {
+      claim: 'sub',
+      value: firebaseUserId
+    });
+
+    if (error) {
+      console.warn('Could not set user context:', error);
+    }
+
+    let query = supabaseData
+      .from('live_monitoring_images')
+      .select('*')
+      .eq('firebase_user_id', firebaseUserId)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (cameraNumber) {
+      query = query.eq('camera_number', cameraNumber);
+    }
+
+    const { data: images, error: queryError } = await query;
+    
+    if (queryError) {
+      console.error('Query error:', queryError);
+      throw queryError;
+    }
+    
+    console.log('Retrieved more images:', images);
+    return images || [];
+  }
+};
+
+// Helper function to upload images to Supabase storage
+export async function uploadImage(file, bucket = 'grapeguard-images', folder = 'detections') {
+  try {
+    const fileExt = file.name?.split('.').pop() || 'jpg';
+    const fileName = `${folder}/${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
+    
+    const { data, error } = await supabaseData.storage
+      .from(bucket)
+      .upload(fileName, file, {
+        cacheControl: '3600',
+        upsert: false
+      });
+
+    if (error) throw error;
+
+    // Get public URL
+    const { data: { publicUrl } } = supabaseData.storage
+      .from(bucket)
+      .getPublicUrl(fileName);
+
+    return {
+      path: data.path,
+      publicUrl: publicUrl,
+      fullPath: fileName
+    };
+  } catch (error) {
+    console.error('Image upload error:', error);
+    throw error;
+  }
+}
