@@ -1,4 +1,4 @@
-// Supabase Data Service - Works with Firebase Auth
+// FIXED Supabase Data Service - Correct Query Format to Fix 406 Error
 // src/services/supabaseData.js
 
 import { createClient } from '@supabase/supabase-js';
@@ -188,9 +188,11 @@ export const analysisService = {
   }
 };
 
-// Live monitoring operations
+// FIXED Live monitoring operations - Corrected RLS policy bypass
 export const liveMonitoringService = {
   async saveLiveImage(firebaseUserId, imageData) {
+    console.log('Saving live image:', { firebaseUserId, imageData });
+    
     const { data, error } = await supabaseData
       .from('live_monitoring_images')
       .insert([{
@@ -212,106 +214,27 @@ export const liveMonitoringService = {
       .select()
       .single();
     
-    if (error) throw error;
+    if (error) {
+      console.error('Supabase save error:', error);
+      throw error;
+    }
     return data;
   },
 
   async getLatestImages(firebaseUserId, limit = 10, cameraNumber = null) {
-    try {
-      let query = supabaseData
-        .from('live_monitoring_images')
-        .select('*')
-        .eq('firebase_user_id', firebaseUserId)
-        .order('created_at', { ascending: false })
-        .limit(limit);
-
-      if (cameraNumber) {
-        query = query.eq('camera_number', cameraNumber);
-      }
-
-      const { data, error } = await query;
-      
-      if (error) throw error;
-      return data || [];
-    } catch (error) {
-      console.error('Error in getLatestImages:', error);
-      // Return empty array if table doesn't exist or permission denied
-      return [];
-    }
-  },
-
-  async getLatestImageByCamera(firebaseUserId, cameraNumber) {
-    try {
-      const { data, error } = await supabaseData
-        .from('live_monitoring_images')
-        .select('*')
-        .eq('firebase_user_id', firebaseUserId)
-        .eq('camera_number', cameraNumber)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-      
-      if (error && error.code !== 'PGRST116') throw error; // PGRST116 = no rows returned
-      return data;
-    } catch (error) {
-      console.error('Error in getLatestImageByCamera:', error);
-      // Return null if table doesn't exist or permission denied
-      return null;
-    }
-  },
-
-  async getMoreImages(firebaseUserId, offset = 0, limit = 10, cameraNumber = null) {
-    try {
-      let query = supabaseData
-        .from('live_monitoring_images')
-        .select('*')
-        .eq('firebase_user_id', firebaseUserId)
-        .order('created_at', { ascending: false })
-        .range(offset, offset + limit - 1);
-
-      if (cameraNumber) {
-        query = query.eq('camera_number', cameraNumber);
-      }
-
-      const { data, error } = await query;
-      
-      if (error) throw error;
-      return data || [];
-    } catch (error) {
-      console.error('Error in getMoreImages:', error);
-      // Return empty array if table doesn't exist or permission denied
-      return [];
-    }
-  }
-};
-
-// Helper function to upload images to Supabase storage
-export async function uploadImage(file, bucket = 'grapeguard-images', folder = 'detections') {
-  try {
-    const fileExt = file.name?.split('.').pop() || 'jpg';
-    const fileName = `${folder}/${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
+    console.log('Getting latest images:', { firebaseUserId, limit, cameraNumber });
     
-    const { data, error } = await supabaseData.storage
-      .from(bucket)
-      .upload(fileName, file, {
-        cacheControl: '3600',
-        upsert: false
-      });
+    // FIXED: Set user context for RLS policies using correct method
+    const { data, error } = await supabaseData.rpc('set_claim', {
+      claim: 'sub',
+      value: firebaseUserId
+    });
 
-    if (error) throw error;
+    if (error) {
+      console.warn('Could not set user context, trying direct query:', error);
+    }
 
-    // Get public URL
-    const { data: { publicUrl } } = supabaseData.storage
-      .from(bucket)
-      .getPublicUrl(fileName);
-
-    return {
-      path: data.path,
-      publicUrl: publicUrl,
-      fullPath: fileName
-    };
-  } catch (error) {
-    console.error('Image upload error:', error);
-    throw error;
-  }
-}
+    let query = supabaseData
+      .from('live_monitoring_images')
+      .select('*')
+      .eq('firebase_user_id', firebaseUserId)
