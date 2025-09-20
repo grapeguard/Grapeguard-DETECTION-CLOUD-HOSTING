@@ -281,6 +281,11 @@ export const marathiTranslations = {
 
   // Loading and basic states
   loadingAlerts: "अलर्ट लोड होत आहेत...",
+  loading: "लोड होत आहे...",
+  showMore: "अधिक दाखवा",
+  liveMonitoringActive: "लाइव्ह मॉनिटरिंग सक्रिय",
+  noLiveImagesYet: "अद्याप कोणतीही लाइव्ह इमेज नाही",
+  liveImagesWillAppearHere: "तुमच्या कॅमेऱ्यांच्या लाइव्ह इमेज येथे दिसतील",
   unknownTime: "अज्ञात वेळ",
   noTimestamp: "कोणताही टाइमस्टॅम्प उपलब्ध नाही",
   invalidTime: "अवैध वेळ",
