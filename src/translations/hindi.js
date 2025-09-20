@@ -249,6 +249,11 @@ export const hindiTranslations = {
   // ===== COMPLETE ALERTS PAGE TRANSLATIONS =====
   // Loading and basic states
   loadingAlerts: "अलर्ट लोड हो रहे हैं...",
+  loading: "लोड हो रहा है...",
+  showMore: "और दिखाएं",
+  liveMonitoringActive: "लाइव मॉनिटरिंग सक्रिय",
+  noLiveImagesYet: "अभी तक कोई लाइव इमेज नहीं",
+  liveImagesWillAppearHere: "आपके कैमरों की लाइव इमेज यहां दिखाई देंगी",
   unknownTime: "अज्ञात समय",
   noTimestamp: "कोई टाइमस्टैम्प उपलब्ध नहीं",
   invalidTime: "अमान्य समय",
