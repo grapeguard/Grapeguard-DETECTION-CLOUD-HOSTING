@@ -1,4 +1,4 @@
-// Fixed LiveCameraFeed.js with Proper Analysis History Cards Format
+// Fixed LiveCameraFeed.js - Resolving 406 Error and Function Issues
 // src/components/live-monitoring/LiveCameraFeed.js
 
 import React, { useState, useEffect } from 'react';
@@ -111,9 +111,7 @@ export default function LiveCameraFeed() {
     }
   };
 
-  // Removed AI model loading - no longer needed
-
-  // Load latest live monitoring images from Supabase
+  // FIXED: Load latest live monitoring images from Supabase
   const loadLatestImages = async (uid) => {
     try {
       if (!uid) { 
@@ -122,8 +120,12 @@ export default function LiveCameraFeed() {
         return; 
       }
       
-      // Load 10 latest images for history
+      console.log('Loading latest images for user:', uid);
+      
+      // FIXED: Using correct service method
       const items = await analysisSupabaseService.getLatestLiveImages(uid, 10);
+      console.log('Loaded items:', items);
+      
       setDetectionHistory(items.map(it => ({
         id: it.id,
         historyId: `sb_${it.id}`,
@@ -141,11 +143,14 @@ export default function LiveCameraFeed() {
         driveUploadTime: it.driveUploadTime
       })));
 
-      // Load latest image for each camera
+      // FIXED: Load latest image for each camera using correct service method
       const [camera1Image, camera2Image] = await Promise.all([
         analysisSupabaseService.getLatestImageByCamera(uid, 1),
         analysisSupabaseService.getLatestImageByCamera(uid, 2)
       ]);
+
+      console.log('Camera 1 image:', camera1Image);
+      console.log('Camera 2 image:', camera2Image);
 
       setCameraResults({
         camera1: camera1Image ? {
@@ -172,46 +177,47 @@ export default function LiveCameraFeed() {
 
     } catch (e) {
       console.error('Failed to load latest live images:', e);
+      setError(`Failed to load live images: ${e.message}`);
     }
   };
 
-  useEffect(() => { loadLatestImages(currentUser?.uid); }, [currentUser?.uid]);
-
-  // Removed saveToHistory function - no longer needed
+  useEffect(() => { 
+    console.log('Current user changed:', currentUser?.uid);
+    loadLatestImages(currentUser?.uid); 
+  }, [currentUser?.uid]);
 
   const deleteIndividualHistory = (historyId) => {
     const updatedHistory = detectionHistory.filter(item => 
       (item.historyId || item.id) !== historyId
     );
     setDetectionHistory(updatedHistory);
-    localStorage.setItem('liveDetectionHistory', JSON.stringify(updatedHistory));
-    console.log(`🗑️ Deleted history item: ${historyId}`);
+    console.log(`Deleted history item: ${historyId}`);
   };
-
-  // Removed startAutoDetection function - no longer needed
-
-  // Removed processImage function - no longer needed
 
   const clearCurrentResults = () => {
     setCameraResults({ camera1: null, camera2: null });
     setError(null);
-    console.log('🧹 Cleared current results (history preserved)');
+    console.log('Cleared current results (history preserved)');
   };
 
   const clearHistory = () => {
     setDetectionHistory([]);
     setShowMoreOffset(0);
-    localStorage.removeItem('liveDetectionHistory');
-    console.log('🗑️ Cleared detection history');
+    console.log('Cleared detection history');
   };
 
+  // FIXED: Load more images function
   const loadMoreImages = async () => {
     if (!currentUser?.uid || isLoadingMore) return;
     
     setIsLoadingMore(true);
     try {
       const newOffset = showMoreOffset + 10;
+      console.log('Loading more images with offset:', newOffset);
+      
+      // FIXED: Using correct service method
       const moreItems = await analysisSupabaseService.getMoreLiveImages(currentUser.uid, newOffset, 10);
+      console.log('Loaded more items:', moreItems);
       
       if (moreItems.length > 0) {
         const newHistoryItems = moreItems.map(it => ({
@@ -236,6 +242,7 @@ export default function LiveCameraFeed() {
       }
     } catch (e) {
       console.error('Failed to load more images:', e);
+      setError(`Failed to load more images: ${e.message}`);
     } finally {
       setIsLoadingMore(false);
     }
@@ -315,7 +322,7 @@ export default function LiveCameraFeed() {
         </Grid>
       </Grid>
 
-      {/* Detection History - FIXED: Proper format matching Detection page */}
+      {/* Detection History */}
       <Card elevation={2} style={{ backgroundColor: 'white', borderRadius: '12px' }}>
         <CardContent style={{ padding: '1.5rem' }}>
           <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
@@ -362,16 +369,15 @@ export default function LiveCameraFeed() {
             </Box>
           ) : (
             <Grid container spacing={2}>
-              {/* FIXED: Proper format with exactly 5 items per row */}
               {detectionHistory.map((result) => {
                 const diseaseNames = getDiseaseDisplayName(result.detection.disease, language);
                 
                 return (
                   <Grid 
                     item 
-                    xs={12}    // Full width on mobile
-                    sm={6}     // 2 per row on small screens
-                    md={2.4}   // 5 per row on medium+ screens (12/5 = 2.4)
+                    xs={12}
+                    sm={6}
+                    md={2.4}
                     key={result.historyId || result.id}
                   >
                     <Card 
@@ -381,7 +387,7 @@ export default function LiveCameraFeed() {
                         border: '1px solid #e5e7eb',
                         position: 'relative',
                         backgroundColor: 'white',
-                        height: '350px' // Increased height to match Detection page format
+                        height: '350px'
                       }}
                       onMouseEnter={(e) => {
                         e.currentTarget.style.transform = 'translateY(-2px)';
@@ -443,7 +449,6 @@ export default function LiveCameraFeed() {
                                 objectFit: 'cover'
                               }}
                               onError={(e) => {
-                                // Fallback to original if visualization fails
                                 if (result.originalImage && e.target.src !== result.originalImage) {
                                   e.target.src = result.originalImage;
                                 }
@@ -490,22 +495,19 @@ export default function LiveCameraFeed() {
                           </Typography>
                         )}
                         
-                        {/* Camera only (confidence moved up) */}
                         <Typography variant="caption" color="textSecondary" style={{ display: 'block', marginBottom: '0.25rem' }}>
                           {t('camera')} {result.camera}
                         </Typography>
                         
-                        {/* Drive Upload Time - EXACT format from image */}
                         <Typography variant="caption" color="textSecondary" style={{ display: 'block', marginBottom: '0.25rem', fontStyle: 'italic' }}>
                           📸 {t('drive')}: {formatDriveUploadTime(result.driveUploadTime)}
                         </Typography>
                         
-                        {/* Analysis Time - EXACT format from image */}
                         <Typography variant="caption" color="textSecondary" style={{ display: 'block', marginBottom: '0.5rem', fontStyle: 'italic' }}>
                           🤖 {t('analyzed')}: {formatDriveUploadTime(result.timestamp)}
                         </Typography>
                         
-                        {/* Severity and Status Chips - Using translated severity labels */}
+                        {/* Severity and Status Chips */}
                         <Box display="flex" gap={0.5} flexWrap="wrap" style={{ marginTop: 'auto' }}>
                           <Chip
                             label={getSeverityLabel(result.detection.severity)}
