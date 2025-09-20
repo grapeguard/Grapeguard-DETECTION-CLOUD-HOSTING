@@ -1,3 +1,6 @@
+// FIXED AnalysisSupabaseService.js - Handles RLS Context Properly
+// src/services/AnalysisSupabaseService.js
+
 import { supabaseData, uploadImage, detectionService, liveMonitoringService } from './supabaseData';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -7,12 +10,25 @@ async function dataUrlToBlob(dataUrl) {
 }
 
 class AnalysisSupabaseService {
+  // FIXED: Helper method to set user context for RLS
+  async setUserContext(firebaseUserId) {
+    try {
+      await supabaseData.rpc('set_claim', {
+        claim: 'sub',
+        value: firebaseUserId
+      });
+    } catch (error) {
+      console.warn('Could not set user context:', error);
+      // Continue without setting context - queries will still work with explicit filtering
+    }
+  }
+
   async uploadImagesAndSave(firebaseUserId, options) {
     const {
-      originalImageDataUrl, // string data URL
-      visualizationImageDataUrl, // string data URL (optional)
-      result, // detection result object
-      context = 'manual', // 'manual' | 'live'
+      originalImageDataUrl,
+      visualizationImageDataUrl,
+      result,
+      context = 'manual',
       camera = null,
     } = options;
 
@@ -23,7 +39,6 @@ class AnalysisSupabaseService {
     const analysisId = uuidv4();
     const folder = `analyses/${firebaseUserId}/${analysisId}`;
 
-    // Upload images to Supabase Storage
     let originalUrl = null;
     let visUrl = null;
 
@@ -44,7 +59,6 @@ class AnalysisSupabaseService {
         visUrl = visUpload.publicUrl;
       }
 
-      // Save to Supabase database
       const detectionData = {
         type: context,
         image_url: originalUrl,
@@ -70,12 +84,6 @@ class AnalysisSupabaseService {
 
     } catch (error) {
       console.error('Supabase upload/save failed:', error);
-      console.error('Error details:', {
-        message: error.message,
-        code: error.code,
-        details: error.details,
-        hint: error.hint
-      });
       throw error;
     }
   }
@@ -84,7 +92,9 @@ class AnalysisSupabaseService {
     if (!firebaseUserId) return [];
     
     try {
-      // Query directly with user filter to ensure only user's data is returned
+      // Set user context for RLS
+      await this.setUserContext(firebaseUserId);
+
       let query = supabaseData
         .from('detections')
         .select('*')
@@ -100,7 +110,6 @@ class AnalysisSupabaseService {
       
       if (error) throw error;
       
-      // Map to AnalysisHistory card format
       return (detections || []).map(detection => ({
         id: detection.id,
         disease: detection.disease_detected,
@@ -119,12 +128,10 @@ class AnalysisSupabaseService {
     }
   }
 
-  // Live monitoring specific methods
   async saveLiveMonitoringImage(firebaseUserId, imageData) {
     const analysisId = uuidv4();
     const folder = `live-monitoring/${firebaseUserId}/${analysisId}`;
 
-    // Upload images to Supabase Storage
     let originalUrl = null;
     let visUrl = null;
 
@@ -145,7 +152,6 @@ class AnalysisSupabaseService {
         visUrl = visUpload.publicUrl;
       }
 
-      // Save to live monitoring table
       const liveImageData = {
         cameraNumber: imageData.cameraNumber,
         imageUrl: originalUrl,
@@ -176,9 +182,21 @@ class AnalysisSupabaseService {
     }
   }
 
+  // FIXED: Get latest live images with proper error handling
   async getLatestLiveImages(firebaseUserId, limit = 10, cameraNumber = null) {
+    if (!firebaseUserId) {
+      console.log('No firebaseUserId provided');
+      return [];
+    }
+
     try {
+      console.log('AnalysisSupabaseService.getLatestLiveImages called:', { firebaseUserId, limit, cameraNumber });
+      
+      // Set user context for RLS
+      await this.setUserContext(firebaseUserId);
+      
       const images = await liveMonitoringService.getLatestImages(firebaseUserId, limit, cameraNumber);
+      console.log('Retrieved images from service:', images);
       
       return images.map(image => ({
         id: image.id,
@@ -198,20 +216,26 @@ class AnalysisSupabaseService {
       }));
     } catch (error) {
       console.error('Failed to get latest live images:', error);
-      // Fallback: return empty array if table doesn't exist yet
-      if (error.message?.includes('relation "live_monitoring_images" does not exist') || 
-          error.message?.includes('permission denied') ||
-          error.status === 406) {
-        console.warn('Live monitoring table not found or no permission. Returning empty array.');
-        return [];
-      }
+      // Return empty array instead of throwing to prevent UI crashes
       return [];
     }
   }
 
+  // FIXED: Get latest image by camera with proper error handling
   async getLatestImageByCamera(firebaseUserId, cameraNumber) {
+    if (!firebaseUserId) {
+      console.log('No firebaseUserId provided');
+      return null;
+    }
+
     try {
+      console.log('AnalysisSupabaseService.getLatestImageByCamera called:', { firebaseUserId, cameraNumber });
+      
+      // Set user context for RLS
+      await this.setUserContext(firebaseUserId);
+      
       const image = await liveMonitoringService.getLatestImageByCamera(firebaseUserId, cameraNumber);
+      console.log('Retrieved camera image from service:', image);
       
       if (!image) return null;
 
@@ -233,20 +257,26 @@ class AnalysisSupabaseService {
       };
     } catch (error) {
       console.error('Failed to get latest image by camera:', error);
-      // Fallback: return null if table doesn't exist yet
-      if (error.message?.includes('relation "live_monitoring_images" does not exist') || 
-          error.message?.includes('permission denied') ||
-          error.status === 406) {
-        console.warn('Live monitoring table not found or no permission. Returning null.');
-        return null;
-      }
+      // Return null instead of throwing to prevent UI crashes
       return null;
     }
   }
 
+  // FIXED: Get more live images with proper error handling
   async getMoreLiveImages(firebaseUserId, offset = 0, limit = 10, cameraNumber = null) {
+    if (!firebaseUserId) {
+      console.log('No firebaseUserId provided');
+      return [];
+    }
+
     try {
+      console.log('AnalysisSupabaseService.getMoreLiveImages called:', { firebaseUserId, offset, limit, cameraNumber });
+      
+      // Set user context for RLS
+      await this.setUserContext(firebaseUserId);
+      
       const images = await liveMonitoringService.getMoreImages(firebaseUserId, offset, limit, cameraNumber);
+      console.log('Retrieved more images from service:', images);
       
       return images.map(image => ({
         id: image.id,
@@ -266,13 +296,7 @@ class AnalysisSupabaseService {
       }));
     } catch (error) {
       console.error('Failed to get more live images:', error);
-      // Fallback: return empty array if table doesn't exist yet
-      if (error.message?.includes('relation "live_monitoring_images" does not exist') || 
-          error.message?.includes('permission denied') ||
-          error.status === 406) {
-        console.warn('Live monitoring table not found or no permission. Returning empty array.');
-        return [];
-      }
+      // Return empty array instead of throwing to prevent UI crashes
       return [];
     }
   }
