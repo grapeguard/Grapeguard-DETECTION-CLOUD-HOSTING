@@ -18,7 +18,8 @@ import {
 import {
   Clear as ClearIcon,
   Camera as CameraIcon,
-  Delete as DeleteIcon
+  Delete as DeleteIcon,
+  Psychology as AIIcon
 } from '@mui/icons-material';
 import { useTranslation } from '../../context/LanguageContext';
 import EnhancedCameraCard from './EnhancedCameraCard';
