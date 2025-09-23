@@ -210,22 +210,36 @@ export default function LiveCameraFeed() {
       const start = nextDrivePage * 10;
       const end = start + 10;
       const slice = images.slice(start, end);
-      const mapped = slice.map((img, idx) => ({
-        id: `drive_${img.id}_${start + idx}`,
-        historyId: `drive_${img.id}_${start + idx}`,
-        camera: img.name?.toLowerCase().includes('_2.jpg') ? 2 : 1,
-        originalImage: `${driveService.baseUrl}/files/${img.id}?alt=media&key=${driveService.apiKey}`,
-        visualizationImage: null,
-        detection: {
-          disease: 'Unknown',
-          confidence: 0,
-          severity: 'None',
-          detectedRegions: 0
-        },
-        timestamp: img.createdTime,
-        driveUploadTime: img.createdTime,
-        driveFileName: img.name
-      }));
+      const mapped = await Promise.all(slice.map(async (img, idx) => {
+        let dataUrl = null;
+        try {
+          // Render via data URL to avoid transient CORS/referrer issues with direct media URLs
+          dataUrl = await driveService.getImageAsDataUrl({
+            id: img.id,
+            name: img.name,
+            downloadUrl: `${driveService.baseUrl}/files/${img.id}?alt=media&key=${driveService.apiKey}`
+          });
+        } catch (_) {
+          // Fallback to direct URL if conversion fails
+          dataUrl = `${driveService.baseUrl}/files/${img.id}?alt=media&key=${driveService.apiKey}`;
+        }
+        return {
+          id: `drive_${img.id}_${start + idx}`,
+          historyId: `drive_${img.id}_${start + idx}`,
+          camera: img.name?.toLowerCase().includes('_2.jpg') ? 2 : 1,
+          originalImage: dataUrl,
+          visualizationImage: null,
+          detection: {
+            disease: 'Unknown',
+            confidence: 0,
+            severity: 'None',
+            detectedRegions: 0
+          },
+          timestamp: img.createdTime,
+          driveUploadTime: img.createdTime,
+          driveFileName: img.name
+        };
+      }))
       if (nextDrivePage === 0) {
         setDetectionHistory(mapped);
       } else {
