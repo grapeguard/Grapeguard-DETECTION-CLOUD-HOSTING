@@ -254,11 +254,77 @@ export default function LiveCameraFeed() {
       }
       setDrivePage(nextDrivePage);
       setHasMore(end < images.length);
+
+      // Background: run AI detection and persist to Supabase for these Drive items
+      if (mapped.length > 0 && isModelLoaded && !modelError) {
+        try {
+          await detectAndPersistForDriveItems(mapped);
+        } catch (e) {
+          console.error('Background detection for Drive items failed:', e);
+        }
+      }
     } catch (err) {
       console.error('Drive fallback failed:', err);
       setIsDriveFallback(false);
     } finally {
       setIsLoadingPage(false);
+    }
+  };
+
+  // Detect and persist visualization for Drive fallback items
+  const detectAndPersistForDriveItems = async (items) => {
+    const updates = [];
+    for (const item of items) {
+      try {
+        // Skip if already visualized
+        if (item.visualizationImage) continue;
+        const imgEl = new Image();
+        const result = await new Promise((resolve, reject) => {
+          imgEl.onload = async () => {
+            try {
+              const det = await detectionService.predict(imgEl, true);
+              resolve(det);
+            } catch (e) { reject(e); }
+          };
+          imgEl.onerror = () => reject(new Error('Image load failed'));
+          imgEl.crossOrigin = 'anonymous';
+          imgEl.src = item.originalImage;
+        });
+
+        const updated = {
+          ...item,
+          visualizationImage: result.visualizationImage || item.originalImage,
+          detection: result,
+          timestamp: new Date().toISOString()
+        };
+        updates.push(updated);
+
+        // Persist to Supabase for current user
+        if (currentUser?.uid) {
+          await analysisSupabaseService.uploadImagesAndSave(currentUser.uid, {
+            originalImageDataUrl: item.originalImage,
+            visualizationImageDataUrl: result.visualizationImage || item.originalImage,
+            result: {
+              disease: result.disease,
+              confidence: result.confidence,
+              severity: result.severity,
+              detectedRegions: result.detectedRegions,
+              modelType: 'AI (HF Space)'
+            },
+            context: 'live',
+            camera: item.camera
+          });
+        }
+      } catch (e) {
+        // Keep showing original image even if detection fails
+        console.warn('Detection failed for drive item', item.id, e?.message || e);
+      }
+    }
+    if (updates.length > 0) {
+      setDetectionHistory(prev => prev.map(it => {
+        const u = updates.find(x => x.id === it.id);
+        return u ? u : it;
+      }));
     }
   };
 
