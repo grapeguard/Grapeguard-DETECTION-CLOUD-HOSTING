@@ -68,8 +68,10 @@ export default function LiveCameraFeed() {
   const [hasMore, setHasMore] = useState(false);
   const [isLoadingPage, setIsLoadingPage] = useState(false);
   const [isDriveFallback, setIsDriveFallback] = useState(false);
-  const [driveCache, setDriveCache] = useState([]); // cache of latest folder images (max 20 from API)
+  const [driveCache, setDriveCache] = useState([]); // accumulated images across folders
   const [drivePage, setDrivePage] = useState(0);
+  const [driveFolders, setDriveFolders] = useState([]);
+  const [driveFolderIndex, setDriveFolderIndex] = useState(0);
 
   // Disease name mapping with multilingual support
   const getDiseaseDisplayName = (disease, currentLanguage) => {
@@ -203,13 +205,24 @@ export default function LiveCameraFeed() {
       if (images.length === 0) {
         const dateFolders = await driveService.getDateFolders();
         if (!dateFolders || dateFolders.length === 0) { setDetectionHistory([]); setHasMore(false); return; }
+        setDriveFolders(dateFolders);
+        setDriveFolderIndex(0);
         const latestDateFolder = dateFolders[0];
-        images = await driveService.getImagesFromFolder(latestDateFolder.id); // returns up to 20, ordered desc
+        images = await driveService.getImagesFromFolder(latestDateFolder.id);
         setDriveCache(images);
       }
       const start = nextDrivePage * 10;
-      const end = start + 10;
-      const slice = images.slice(start, end);
+      let end = start + 10;
+      let workingImages = images.slice();
+      while (workingImages.length < end && driveFolders.length > 0 && (driveFolderIndex + 1) < driveFolders.length) {
+        const nextIdx = driveFolderIndex + 1;
+        const nextFolder = driveFolders[nextIdx];
+        const more = await driveService.getImagesFromFolder(nextFolder.id);
+        workingImages = workingImages.concat(more);
+        setDriveCache(workingImages);
+        setDriveFolderIndex(nextIdx);
+      }
+      const slice = workingImages.slice(start, end);
       // De-dup against already-rendered items (avoid repeating same Drive file)
       const existingIds = new Set((nextDrivePage === 0 ? [] : detectionHistory).map(it => String(it.id)));
       const mapped = await Promise.all(slice.map(async (img, idx) => {
@@ -219,11 +232,11 @@ export default function LiveCameraFeed() {
           dataUrl = await driveService.getImageAsDataUrl({
             id: img.id,
             name: img.name,
-            downloadUrl: `${driveService.baseUrl}/files/${img.id}?alt=media&key=${driveService.apiKey}`
+            downloadUrl: driveService.buildDownloadUrl(img.id)
           });
         } catch (_) {
-          // Fallback to direct URL if conversion fails
-          dataUrl = `${driveService.baseUrl}/files/${img.id}?alt=media&key=${driveService.apiKey}`;
+          // Fallback to proxy/direct URL
+          dataUrl = driveService.buildDownloadUrl(img.id);
         }
         const computedId = `drive_${img.id}`;
         if (existingIds.has(computedId)) {
@@ -253,7 +266,9 @@ export default function LiveCameraFeed() {
         setDetectionHistory(prev => [...prev, ...mapped]);
       }
       setDrivePage(nextDrivePage);
-      setHasMore(end < images.length);
+      const moreInWorking = end < workingImages.length;
+      const moreFoldersRemain = driveFolders.length > 0 && (driveFolderIndex + 1) < driveFolders.length;
+      setHasMore(moreInWorking || moreFoldersRemain);
 
       // Background: run AI detection and persist to Supabase for these Drive items
       if (mapped.length > 0 && isModelLoaded && !modelError) {
