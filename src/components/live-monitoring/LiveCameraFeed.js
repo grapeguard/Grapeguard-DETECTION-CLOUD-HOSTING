@@ -67,6 +67,9 @@ export default function LiveCameraFeed() {
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(false);
   const [isLoadingPage, setIsLoadingPage] = useState(false);
+  const [isDriveFallback, setIsDriveFallback] = useState(false);
+  const [driveCache, setDriveCache] = useState([]); // cache of latest folder images (max 20 from API)
+  const [drivePage, setDrivePage] = useState(0);
 
   // Disease name mapping with multilingual support
   const getDiseaseDisplayName = (disease, currentLanguage) => {
@@ -176,6 +179,12 @@ export default function LiveCameraFeed() {
       }
       setHasMore(more);
       setPage(nextPage);
+      // Fallback: if no Supabase items on first page, show latest 10 images from Drive
+      if (nextPage === 0 && mapped.length === 0) {
+        await loadDriveRecent(0);
+      } else {
+        setIsDriveFallback(false);
+      }
     } catch (e) {
       console.error('Failed to load Supabase live history (paged):', e);
     } finally {
@@ -184,6 +193,53 @@ export default function LiveCameraFeed() {
   };
 
   useEffect(() => { loadCloudHistoryPage(currentUser?.uid, 0); }, [currentUser?.uid]);
+
+  // Drive fallback: load most recent images from latest date folder
+  const loadDriveRecent = async (nextDrivePage = 0) => {
+    try {
+      setIsLoadingPage(true);
+      setIsDriveFallback(true);
+      let images = driveCache;
+      if (images.length === 0) {
+        const dateFolders = await driveService.getDateFolders();
+        if (!dateFolders || dateFolders.length === 0) { setDetectionHistory([]); setHasMore(false); return; }
+        const latestDateFolder = dateFolders[0];
+        images = await driveService.getImagesFromFolder(latestDateFolder.id); // returns up to 20, ordered desc
+        setDriveCache(images);
+      }
+      const start = nextDrivePage * 10;
+      const end = start + 10;
+      const slice = images.slice(start, end);
+      const mapped = slice.map((img, idx) => ({
+        id: `drive_${img.id}_${start + idx}`,
+        historyId: `drive_${img.id}_${start + idx}`,
+        camera: img.name?.toLowerCase().includes('_2.jpg') ? 2 : 1,
+        originalImage: `${driveService.baseUrl}/files/${img.id}?alt=media&key=${driveService.apiKey}`,
+        visualizationImage: null,
+        detection: {
+          disease: 'Unknown',
+          confidence: 0,
+          severity: 'None',
+          detectedRegions: 0
+        },
+        timestamp: img.createdTime,
+        driveUploadTime: img.createdTime,
+        driveFileName: img.name
+      }));
+      if (nextDrivePage === 0) {
+        setDetectionHistory(mapped);
+      } else {
+        setDetectionHistory(prev => [...prev, ...mapped]);
+      }
+      setDrivePage(nextDrivePage);
+      setHasMore(end < images.length);
+    } catch (err) {
+      console.error('Drive fallback failed:', err);
+      setIsDriveFallback(false);
+    } finally {
+      setIsLoadingPage(false);
+    }
+  };
 
   const saveToHistory = (results) => {
     try {
@@ -633,7 +689,13 @@ export default function LiveCameraFeed() {
             <Box display="flex" justifyContent="center" mt={3}>
               <Button
                 variant="outlined"
-                onClick={() => loadCloudHistoryPage(currentUser?.uid, page + 1)}
+                onClick={() => {
+                  if (isDriveFallback) {
+                    loadDriveRecent(drivePage + 1);
+                  } else {
+                    loadCloudHistoryPage(currentUser?.uid, page + 1);
+                  }
+                }}
                 disabled={!hasMore || isLoadingPage}
               >
                 {isLoadingPage ? t('loading') || 'Loading...' : (hasMore ? (t('showMore') || 'Show more') : (t('noMore') || 'No more'))}
