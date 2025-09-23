@@ -72,6 +72,7 @@ export default function LiveCameraFeed() {
   const [drivePage, setDrivePage] = useState(0);
   const [driveFolders, setDriveFolders] = useState([]);
   const [driveFolderIndex, setDriveFolderIndex] = useState(0);
+  const [drivePageToken, setDrivePageToken] = useState(null);
 
   // Disease name mapping with multilingual support
   const getDiseaseDisplayName = (disease, currentLanguage) => {
@@ -208,19 +209,35 @@ export default function LiveCameraFeed() {
         setDriveFolders(dateFolders);
         setDriveFolderIndex(0);
         const latestDateFolder = dateFolders[0];
-        images = await driveService.getImagesFromFolder(latestDateFolder.id);
+        const page = await driveService.getImagesFromFolderPage(latestDateFolder.id, undefined, 100);
+        images = page.files;
         setDriveCache(images);
+        setDrivePageToken(page.nextPageToken || null);
       }
       const start = nextDrivePage * 10;
       let end = start + 10;
       let workingImages = images.slice();
+      // First, exhaust pages within the current latest folder
+      if (workingImages.length < end && driveFolders.length > 0) {
+        const currentFolder = driveFolders[driveFolderIndex] || driveFolders[0];
+        while (drivePageToken && workingImages.length < end) {
+          const page = await driveService.getImagesFromFolderPage(currentFolder.id, drivePageToken, 100);
+          workingImages = workingImages.concat(page.files);
+          setDrivePageToken(page.nextPageToken || null);
+        }
+      }
+      // Then, move to older folders if still not enough
       while (workingImages.length < end && driveFolders.length > 0 && (driveFolderIndex + 1) < driveFolders.length) {
         const nextIdx = driveFolderIndex + 1;
         const nextFolder = driveFolders[nextIdx];
-        const more = await driveService.getImagesFromFolder(nextFolder.id);
-        workingImages = workingImages.concat(more);
-        setDriveCache(workingImages);
+        const page = await driveService.getImagesFromFolderPage(nextFolder.id, undefined, 100);
+        workingImages = workingImages.concat(page.files);
         setDriveFolderIndex(nextIdx);
+        setDrivePageToken(page.nextPageToken || null);
+      }
+      // Update cache
+      if (workingImages.length !== driveCache.length) {
+        setDriveCache(workingImages);
       }
       const slice = workingImages.slice(start, end);
       // De-dup against already-rendered items (avoid repeating same Drive file)
@@ -267,8 +284,9 @@ export default function LiveCameraFeed() {
       }
       setDrivePage(nextDrivePage);
       const moreInWorking = end < workingImages.length;
-      const moreFoldersRemain = driveFolders.length > 0 && (driveFolderIndex + 1) < driveFolders.length;
-      setHasMore(moreInWorking || moreFoldersRemain);
+      const canPageCurrentFolder = !!drivePageToken;
+      const moreFoldersRemain = driveFolders.length > 0 && ((driveFolderIndex + 1) < driveFolders.length);
+      setHasMore(moreInWorking || canPageCurrentFolder || moreFoldersRemain);
 
       // Background: run AI detection and persist to Supabase for these Drive items
       if (mapped.length > 0 && isModelLoaded && !modelError) {
