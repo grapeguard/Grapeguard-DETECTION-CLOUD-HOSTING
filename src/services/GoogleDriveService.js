@@ -6,6 +6,9 @@ class GoogleDriveService {
     this.apiKey = process.env.REACT_APP_GOOGLE_DRIVE_API_KEY;
     this.folderId = process.env.REACT_APP_DRIVE_FOLDER_ID;
     this.baseUrl = 'https://www.googleapis.com/drive/v3';
+    // Optional backend proxy (Flask/Render or any server) to bypass CORS
+    // Example: REACT_APP_PROXY_BASE_URL=https://your-backend.onrender.com
+    this.proxyBase = process.env.REACT_APP_PROXY_BASE_URL || null;
     
     console.log('🔧 GoogleDriveService initialized');
     console.log(`📁 Folder ID: ${this.folderId}`);
@@ -145,7 +148,7 @@ class GoogleDriveService {
             size: image.size,
             thumbnailUrl: image.thumbnailLink,
             webViewLink: image.webViewLink,
-            downloadUrl: `${this.baseUrl}/files/${image.id}?alt=media&key=${this.apiKey}`,
+            downloadUrl: this.buildDownloadUrl(image.id),
             isReal: true,
             camera: 1
           };
@@ -161,7 +164,7 @@ class GoogleDriveService {
             size: image.size,
             thumbnailUrl: image.thumbnailLink,
             webViewLink: image.webViewLink,
-            downloadUrl: `${this.baseUrl}/files/${image.id}?alt=media&key=${this.apiKey}`,
+            downloadUrl: this.buildDownloadUrl(image.id),
             isReal: true,
             camera: 2
           };
@@ -182,7 +185,7 @@ class GoogleDriveService {
     try {
       console.log(`⬇️ Downloading image: ${imageData.name}`);
       
-      const response = await fetch(imageData.downloadUrl);
+      const response = await fetch(imageData.downloadUrl, { mode: 'cors' });
       
       if (!response.ok) {
         throw new Error(`Download failed: ${response.status}`);
@@ -214,6 +217,15 @@ class GoogleDriveService {
       console.error(`❌ Failed to convert ${imageData.name} to data URL:`, error);
       throw error;
     }
+  }
+
+  // Build a CORS-safe download URL, preferring backend proxy when configured
+  buildDownloadUrl(fileId) {
+    if (this.proxyBase) {
+      const base = this.proxyBase.replace(/\/$/, '');
+      return `${base}/drive/file/${encodeURIComponent(fileId)}`;
+    }
+    return `${this.baseUrl}/files/${fileId}?alt=media&key=${this.apiKey}`;
   }
 }
 
