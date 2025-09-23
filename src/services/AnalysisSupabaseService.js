@@ -36,10 +36,11 @@ class AnalysisSupabaseService {
         originalUrl = originalUpload.publicUrl;
       }
 
-      if (visualizationImageDataUrl) {
-        const visBlob = await dataUrlToBlob(visualizationImageDataUrl);
+      // Always upload a visualization image: if not produced by AI, reuse original
+      const visualizationSource = visualizationImageDataUrl || originalImageDataUrl || null;
+      if (visualizationSource) {
+        const visBlob = await dataUrlToBlob(visualizationSource);
         const visFile = new File([visBlob], 'visualization.jpg', { type: 'image/jpeg' });
-        
         const visUpload = await uploadImage(visFile, 'grapeguard-images', folder);
         visUrl = visUpload.publicUrl;
       }
