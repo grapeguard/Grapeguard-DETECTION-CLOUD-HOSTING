@@ -22,8 +22,7 @@ import {
   Camera as CameraIcon,
   CheckCircle as CheckCircleIcon,
   Error as ErrorIcon,
-  Delete as DeleteIcon,
-  ExpandMore as ExpandMoreIcon
+  Delete as DeleteIcon
 } from '@mui/icons-material';
 import { useTranslation } from '../../context/LanguageContext';
 import GoogleDriveService from '../../services/GoogleDriveService';
@@ -31,7 +30,6 @@ import DetectronDiseaseService from '../../services/DetectronDiseaseService';
 import EnhancedCameraCard from './EnhancedCameraCard';
 import { useAuth } from '../../context/AuthContext';
 import analysisSupabaseService from '../../services/AnalysisSupabaseService';
-import liveMonitoringService from '../../services/LiveMonitoringService';
 
 export default function LiveCameraFeed() {
   const [driveService] = useState(new GoogleDriveService());
@@ -66,14 +64,9 @@ export default function LiveCameraFeed() {
   });
   
   const [detectionHistory, setDetectionHistory] = useState([]);
-  const [recentImages, setRecentImages] = useState([]);
-  const [latestCameraImages, setLatestCameraImages] = useState({
-    camera1: null,
-    camera2: null
-  });
-  const [showMoreOffset, setShowMoreOffset] = useState(0);
-  const [isLoadingMore, setIsLoadingMore] = useState(false);
-  const [hasMoreImages, setHasMoreImages] = useState(true);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [isLoadingPage, setIsLoadingPage] = useState(false);
 
   // Disease name mapping with multilingual support
   const getDiseaseDisplayName = (disease, currentLanguage) => {
@@ -156,12 +149,13 @@ export default function LiveCameraFeed() {
     initModel();
   }, [detectionService]);
 
-  // Load per-user live detection history from Supabase
-  const loadCloudHistory = async (uid) => {
+  // Load per-user live detection history from Supabase (paginated: 10 per page)
+  const loadCloudHistoryPage = async (uid, nextPage = 0) => {
     try {
-      if (!uid) { setDetectionHistory([]); return; }
-      const items = await analysisSupabaseService.listUserAnalyses(uid, 20, { type: 'live' });
-      setDetectionHistory(items.map(it => ({
+      if (!uid) { setDetectionHistory([]); setHasMore(false); return; }
+      setIsLoadingPage(true);
+      const { items, hasMore: more } = await analysisSupabaseService.listUserAnalysesPaged(uid, 10, nextPage, { type: 'live' });
+      const mapped = items.map(it => ({
         id: it.id,
         historyId: `sb_${it.id}`,
         camera: it.camera,
@@ -174,64 +168,24 @@ export default function LiveCameraFeed() {
           detectedRegions: it.detectedRegions || 0
         },
         timestamp: it.timestamp
-      })));
-    } catch (e) {
-      console.error('Failed to load Supabase live history:', e);
-    }
-  };
-
-  // Load recent live monitoring images (10 images)
-  const loadRecentImages = async (uid) => {
-    try {
-      if (!uid) { 
-        setRecentImages([]); 
-        setLatestCameraImages({ camera1: null, camera2: null });
-        return; 
-      }
-      
-      const [recent, latest] = await Promise.all([
-        liveMonitoringService.getRecentLiveImages(uid, 10),
-        liveMonitoringService.getLatestCameraImages(uid)
-      ]);
-      
-      setRecentImages(recent);
-      setLatestCameraImages(latest);
-    } catch (e) {
-      console.error('Failed to load recent live images:', e);
-    }
-  };
-
-  // Load more images for SHOW MORE functionality
-  const loadMoreImages = async () => {
-    if (!currentUser?.uid || isLoadingMore) return;
-    
-    setIsLoadingMore(true);
-    try {
-      const moreImages = await liveMonitoringService.getMoreLiveImages(
-        currentUser.uid, 
-        showMoreOffset + 10, 
-        10
-      );
-      
-      if (moreImages.length === 0) {
-        setHasMoreImages(false);
+      }));
+      if (nextPage === 0) {
+        setDetectionHistory(mapped);
       } else {
-        setRecentImages(prev => [...prev, ...moreImages]);
-        setShowMoreOffset(prev => prev + 10);
+        setDetectionHistory(prev => [...prev, ...mapped]);
       }
+      setHasMore(more);
+      setPage(nextPage);
     } catch (e) {
-      console.error('Failed to load more images:', e);
+      console.error('Failed to load Supabase live history (paged):', e);
     } finally {
-      setIsLoadingMore(false);
+      setIsLoadingPage(false);
     }
   };
 
-  useEffect(() => { 
-    loadCloudHistory(currentUser?.uid); 
-    loadRecentImages(currentUser?.uid);
-  }, [currentUser?.uid]);
+  useEffect(() => { loadCloudHistoryPage(currentUser?.uid, 0); }, [currentUser?.uid]);
 
-  const saveToHistory = async (results) => {
+  const saveToHistory = (results) => {
     try {
       const newHistoryItems = [];
       
@@ -256,38 +210,6 @@ export default function LiveCameraFeed() {
       const updatedHistory = [...newHistoryItems, ...detectionHistory];
       setDetectionHistory(updatedHistory);
       localStorage.setItem('liveDetectionHistory', JSON.stringify(updatedHistory));
-      
-      // Also save to live monitoring service
-      if (currentUser?.uid) {
-        try {
-          if (results.camera1) {
-            await liveMonitoringService.saveLiveImage(currentUser.uid, {
-              originalImageDataUrl: results.camera1.originalImage,
-              visualizationImageDataUrl: results.camera1.visualizationImage,
-              analysisResult: results.camera1.detection,
-              cameraNumber: 1,
-              driveFileName: results.camera1.imageData?.name || `camera1_${Date.now()}.jpg`,
-              driveUploadTime: results.camera1.imageData?.createdTime || results.camera1.timestamp
-            });
-          }
-          
-          if (results.camera2) {
-            await liveMonitoringService.saveLiveImage(currentUser.uid, {
-              originalImageDataUrl: results.camera2.originalImage,
-              visualizationImageDataUrl: results.camera2.visualizationImage,
-              analysisResult: results.camera2.detection,
-              cameraNumber: 2,
-              driveFileName: results.camera2.imageData?.name || `camera2_${Date.now()}.jpg`,
-              driveUploadTime: results.camera2.imageData?.createdTime || results.camera2.timestamp
-            });
-          }
-          
-          // Refresh recent images after saving
-          loadRecentImages(currentUser.uid);
-        } catch (saveError) {
-          console.error('Failed to save to live monitoring service:', saveError);
-        }
-      }
       
       console.log('💾 Saved to history:', newHistoryItems.length, 'new items, total:', updatedHistory.length);
       
@@ -347,9 +269,8 @@ export default function LiveCameraFeed() {
       
       
       setCameraResults(results);
-      await saveToHistory(results);
-      
-      // Also persist to the old Supabase service for backward compatibility
+      saveToHistory(results);
+      // Persist each result to Supabase (Storage + Database)
       try {
         if (currentUser?.uid) {
           const tasks = [];
@@ -388,8 +309,8 @@ export default function LiveCameraFeed() {
             );
           }
           await Promise.allSettled(tasks);
-          // Refresh cloud history
-          loadCloudHistory(currentUser.uid);
+          // Refresh cloud history (reset to first page)
+          loadCloudHistoryPage(currentUser.uid, 0);
         }
       } catch (persistErr) {
         console.error('Failed to persist live results to Supabase:', persistErr);
@@ -499,129 +420,27 @@ export default function LiveCameraFeed() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      {/* Control Panel */}
-      <Box display="flex" justifyContent="space-between" alignItems="center" gap={2}>
-        <Box display="flex" gap={2}>
-          <Button
-            variant="contained"
-            size="large"
-            startIcon={isProcessing ? <CircularProgress size={20} color="inherit" /> : <PlayIcon />}
-            onClick={startAutoDetection}
-            disabled={isProcessing || !isModelLoaded || modelError}
-            style={{ 
-              backgroundColor: (!isModelLoaded || modelError) ? '#9ca3af' : '#22c55e', 
-              color: 'white',
-              padding: '0.75rem 2rem'
-            }}
-          >
-            {isProcessing ? t('processing') : t('autoDetectThroughCamera')}
-          </Button>
-          
-          <Button
-            variant="outlined"
-            onClick={clearCurrentResults}
-            disabled={isProcessing}
-            startIcon={<ClearIcon />}
-            style={{ borderColor: '#6b7280', color: '#6b7280' }}
-            size="large"
-          >
-            {t('clearResults')}
-          </Button>
-        </Box>
-
-        <Box display="flex" alignItems="center" gap={1}>
-          <Chip
-            label={t('googleDriveConnected')}
-            color="success"
-            icon={<CheckCircleIcon />}
-            size="small"
-          />
-          <Chip
-            label={isModelLoaded ? t('aiModelReady') : (modelError ? t('aiModelFailed') : t('aiModelLoading'))}
-            color={isModelLoaded ? 'success' : (modelError ? 'error' : 'default')}
-            icon={isModelLoaded ? <AIIcon /> : (modelError ? <ErrorIcon /> : <CircularProgress size={16} />)}
-            size="small"
-          />
-        </Box>
-      </Box>
-
-      {/* Error Display */}
-      {error && (
-        <Alert severity="error" onClose={() => setError(null)}>
-          {error}
-        </Alert>
-      )}
-
-      {/* Model Error Display */}
-      {modelError && (
-        <Alert severity="error" style={{ backgroundColor: '#fef2f2', border: '1px solid #fca5a5' }}>
-          <Typography variant="body2">
-            <strong>{t('detectronServerError')}:</strong> {modelError}
-          </Typography>
-          <Typography variant="body2" style={{ marginTop: '0.5rem' }}>
-            Please check your internet connection and try again.
-          </Typography>
-        </Alert>
-      )}
-
-      {/* Camera Results - Show latest images from live monitoring */}
-      <Grid container spacing={3}>
-        <Grid item xs={12} md={6}>
-          <EnhancedCameraCard 
-            cameraData={cameraResults.camera1 || latestCameraImages.camera1}
-            cameraNumber={1}
-            onCameraClick={(data) => console.log('Camera 1 details:', data)}
-            onDownload={downloadResult}
-          />
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <EnhancedCameraCard 
-            cameraData={cameraResults.camera2 || latestCameraImages.camera2}
-            cameraNumber={2}
-            onCameraClick={(data) => console.log('Camera 2 details:', data)}
-            onDownload={downloadResult}
-          />
-        </Grid>
-      </Grid>
-
-      {/* Recent Analysis History - Show live monitoring images */}
+      {/* Detection History only */}
       <Card elevation={2} style={{ backgroundColor: 'white', borderRadius: '12px' }}>
         <CardContent style={{ padding: '1.5rem' }}>
           <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
             <Typography variant="h6" style={{ fontWeight: 600 }}>
-              {t('recentAnalysisHistory')} ({recentImages.length})
+              {t('recentAnalysisHistory')} ({detectionHistory.length})
             </Typography>
             
-            {recentImages.length > 0 && (
-              <Box display="flex" gap={1}>
-                {hasMoreImages && (
-                  <Button
-                    onClick={loadMoreImages}
-                    disabled={isLoadingMore}
-                    startIcon={isLoadingMore ? <CircularProgress size={16} /> : <ExpandMoreIcon />}
-                    style={{ color: '#8b5cf6' }}
-                    size="small"
-                  >
-                    {isLoadingMore ? t('loading') : t('showMore')}
-                  </Button>
-                )}
-                <Button
-                  onClick={() => {
-                    setRecentImages([]);
-                    setShowMoreOffset(0);
-                    setHasMoreImages(true);
-                  }}
-                  style={{ color: '#ef4444' }}
-                  size="small"
-                  startIcon={<DeleteIcon />}
-                >
-                  {t('clearHistory')}
-                </Button>
-              </Box>
+            {detectionHistory.length > 0 && (
+              <Button
+                onClick={clearHistory}
+                style={{ color: '#ef4444' }}
+                size="small"
+                startIcon={<DeleteIcon />}
+              >
+                {t('clearHistory')}
+              </Button>
             )}
           </Box>
           
-          {recentImages.length === 0 ? (
+          {detectionHistory.length === 0 ? (
             <Box textAlign="center" py={3} style={{ backgroundColor: '#f9fafb', borderRadius: '8px' }}>
               <CameraIcon style={{ fontSize: '3rem', color: '#9ca3af', marginBottom: '1rem' }} />
               <Typography variant="h6" color="textSecondary" style={{ marginBottom: '0.5rem' }}>
@@ -633,8 +452,8 @@ export default function LiveCameraFeed() {
             </Box>
           ) : (
             <Grid container spacing={2}>
-              {/* Show recent live monitoring images */}
-              {recentImages.map((result) => {
+              {/* FIXED: Proper format with exactly 5 items per row */}
+              {detectionHistory.map((result) => {
                 const diseaseNames = getDiseaseDisplayName(result.detection.disease, language);
                 
                 return (
@@ -643,7 +462,7 @@ export default function LiveCameraFeed() {
                     xs={12}    // Full width on mobile
                     sm={6}     // 2 per row on small screens
                     md={2.4}   // 5 per row on medium+ screens (12/5 = 2.4)
-                    key={result.id}
+                    key={result.historyId || result.id}
                   >
                     <Card 
                       elevation={1} 
@@ -675,16 +494,7 @@ export default function LiveCameraFeed() {
                         <Tooltip title={t('deleteThisAnalysis')}>
                           <IconButton
                             size="small"
-                            onClick={async () => {
-                              try {
-                                await liveMonitoringService.deleteLiveImage(currentUser?.uid, result.id);
-                                setRecentImages(prev => prev.filter(img => img.id !== result.id));
-                                // Also refresh latest camera images
-                                loadRecentImages(currentUser?.uid);
-                              } catch (error) {
-                                console.error('Failed to delete image:', error);
-                              }
-                            }}
+                            onClick={() => deleteIndividualHistory(result.historyId || result.id)}
                             style={{ 
                               backgroundColor: 'rgba(239, 68, 68, 0.9)',
                               color: 'white',
@@ -816,6 +626,19 @@ export default function LiveCameraFeed() {
                 );
               })}
             </Grid>
+          )}
+
+          {/* Show more pagination */}
+          {detectionHistory.length > 0 && (
+            <Box display="flex" justifyContent="center" mt={3}>
+              <Button
+                variant="outlined"
+                onClick={() => loadCloudHistoryPage(currentUser?.uid, page + 1)}
+                disabled={!hasMore || isLoadingPage}
+              >
+                {isLoadingPage ? t('loading') || 'Loading...' : (hasMore ? (t('showMore') || 'Show more') : (t('noMore') || 'No more'))}
+              </Button>
+            </Box>
           )}
         </CardContent>
       </Card>
