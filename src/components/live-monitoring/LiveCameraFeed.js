@@ -255,38 +255,8 @@ export default function LiveCameraFeed() {
     }
   };
 
-  const saveToHistory = (results) => {
-    try {
-      const newHistoryItems = [];
-      
-      if (results.camera1) {
-        newHistoryItems.push({
-          ...results.camera1,
-          historyId: `history_${results.camera1.id}_${Date.now()}`,
-          driveUploadTime: results.camera1.imageData?.createdTime || results.camera1.timestamp,
-          driveFileName: results.camera1.imageData?.name || `camera1_${Date.now()}.jpg`
-        });
-      }
-      
-      if (results.camera2) {
-        newHistoryItems.push({
-          ...results.camera2,
-          historyId: `history_${results.camera2.id}_${Date.now() + 1}`,
-          driveUploadTime: results.camera2.imageData?.createdTime || results.camera2.timestamp,
-          driveFileName: results.camera2.imageData?.name || `camera2_${Date.now()}.jpg`
-        });
-      }
-      
-      const updatedHistory = [...newHistoryItems, ...detectionHistory];
-      setDetectionHistory(updatedHistory);
-      localStorage.setItem('liveDetectionHistory', JSON.stringify(updatedHistory));
-      
-      console.log('💾 Saved to history:', newHistoryItems.length, 'new items, total:', updatedHistory.length);
-      
-    } catch (error) {
-      console.error('Failed to save detection history:', error);
-    }
-  };
+  // Disable localStorage-based history in Live Monitoring; rely on Supabase + Drive fallback only
+  const saveToHistory = () => {};
 
   const deleteIndividualHistory = (historyId) => {
     const updatedHistory = detectionHistory.filter(item => 
@@ -339,7 +309,6 @@ export default function LiveCameraFeed() {
       
       
       setCameraResults(results);
-      saveToHistory(results);
       // Persist each result to Supabase (Storage + Database)
       try {
         if (currentUser?.uid) {
@@ -463,8 +432,11 @@ export default function LiveCameraFeed() {
 
   const clearHistory = () => {
     setDetectionHistory([]);
-    localStorage.removeItem('liveDetectionHistory');
-    console.log('🗑️ Cleared detection history');
+    setDriveCache([]);
+    setPage(0);
+    setDrivePage(0);
+    setHasMore(false);
+    console.log('🗑️ Cleared detection history (in-memory only)');
   };
 
   const downloadResult = (result) => {
