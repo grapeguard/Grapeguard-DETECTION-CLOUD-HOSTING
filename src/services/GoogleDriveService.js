@@ -101,14 +101,15 @@ class GoogleDriveService {
     try {
       console.log(`📸 Getting images from folder: ${folderId}`);
       
+      // Back-compat: return first page up to 100
       const response = await fetch(
         `${this.baseUrl}/files?` +
         `q='${folderId}' in parents and ` +
         `mimeType contains 'image/' and ` +
         `trashed=false&` +
         `orderBy=createdTime desc&` +
-        `pageSize=20&` +
-        `fields=files(id,name,createdTime,size,thumbnailLink,webViewLink)&` +
+        `pageSize=100&` +
+        `fields=files(id,name,createdTime,size,thumbnailLink,webViewLink),nextPageToken&` +
         `key=${this.apiKey}`
       );
 
@@ -125,6 +126,30 @@ class GoogleDriveService {
     } catch (error) {
       console.error('❌ Error fetching images from folder:', error);
       throw error;
+    }
+  }
+
+  // New: paginated listing for folders, returns { files, nextPageToken }
+  async getImagesFromFolderPage(folderId, pageToken = undefined, pageSize = 100) {
+    try {
+      const params = new URLSearchParams();
+      params.set('q', `'${folderId}' in parents and mimeType contains 'image/' and trashed=false`);
+      params.set('orderBy', 'createdTime desc');
+      params.set('pageSize', String(pageSize));
+      params.set('fields', 'files(id,name,createdTime,size,thumbnailLink,webViewLink),nextPageToken');
+      params.set('key', this.apiKey);
+      if (pageToken) params.set('pageToken', pageToken);
+      const url = `${this.baseUrl}/files?${params.toString()}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(`Failed to fetch images (paged): ${res.status} ${text}`);
+      }
+      const data = await res.json();
+      return { files: data.files || [], nextPageToken: data.nextPageToken || null };
+    } catch (err) {
+      console.error('❌ Error fetching paged images:', err);
+      throw err;
     }
   }
 
