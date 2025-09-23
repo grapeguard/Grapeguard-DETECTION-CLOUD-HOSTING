@@ -1,7 +1,4 @@
-// FIXED AnalysisSupabaseService.js - Handles RLS Context Properly
-// src/services/AnalysisSupabaseService.js
-
-import { supabaseData, uploadImage, detectionService, liveMonitoringService } from './supabaseData';
+import { supabaseData, uploadImage, detectionService } from './supabaseData';
 import { v4 as uuidv4 } from 'uuid';
 
 async function dataUrlToBlob(dataUrl) {
@@ -10,25 +7,12 @@ async function dataUrlToBlob(dataUrl) {
 }
 
 class AnalysisSupabaseService {
-  // FIXED: Helper method to set user context for RLS
-  async setUserContext(firebaseUserId) {
-    try {
-      await supabaseData.rpc('set_claim', {
-        claim: 'sub',
-        value: firebaseUserId
-      });
-    } catch (error) {
-      console.warn('Could not set user context:', error);
-      // Continue without setting context - queries will still work with explicit filtering
-    }
-  }
-
   async uploadImagesAndSave(firebaseUserId, options) {
     const {
-      originalImageDataUrl,
-      visualizationImageDataUrl,
-      result,
-      context = 'manual',
+      originalImageDataUrl, // string data URL
+      visualizationImageDataUrl, // string data URL (optional)
+      result, // detection result object
+      context = 'manual', // 'manual' | 'live'
       camera = null,
     } = options;
 
@@ -39,6 +23,7 @@ class AnalysisSupabaseService {
     const analysisId = uuidv4();
     const folder = `analyses/${firebaseUserId}/${analysisId}`;
 
+    // Upload images to Supabase Storage
     let originalUrl = null;
     let visUrl = null;
 
@@ -59,6 +44,7 @@ class AnalysisSupabaseService {
         visUrl = visUpload.publicUrl;
       }
 
+      // Save to Supabase database
       const detectionData = {
         type: context,
         image_url: originalUrl,
@@ -84,6 +70,12 @@ class AnalysisSupabaseService {
 
     } catch (error) {
       console.error('Supabase upload/save failed:', error);
+      console.error('Error details:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint
+      });
       throw error;
     }
   }
@@ -92,9 +84,7 @@ class AnalysisSupabaseService {
     if (!firebaseUserId) return [];
     
     try {
-      // Set user context for RLS
-      await this.setUserContext(firebaseUserId);
-
+      // Query directly with user filter to ensure only user's data is returned
       let query = supabaseData
         .from('detections')
         .select('*')
@@ -110,6 +100,7 @@ class AnalysisSupabaseService {
       
       if (error) throw error;
       
+      // Map to AnalysisHistory card format
       return (detections || []).map(detection => ({
         id: detection.id,
         disease: detection.disease_detected,
@@ -128,176 +119,46 @@ class AnalysisSupabaseService {
     }
   }
 
-  async saveLiveMonitoringImage(firebaseUserId, imageData) {
-    const analysisId = uuidv4();
-    const folder = `live-monitoring/${firebaseUserId}/${analysisId}`;
-
-    let originalUrl = null;
-    let visUrl = null;
+  // Paginated list with explicit range and count for "Show more"
+  async listUserAnalysesPaged(firebaseUserId, pageSize = 10, page = 0, options = {}) {
+    if (!firebaseUserId) return { items: [], hasMore: false };
 
     try {
-      if (imageData.originalImageDataUrl) {
-        const originalBlob = await dataUrlToBlob(imageData.originalImageDataUrl);
-        const originalFile = new File([originalBlob], 'original.jpg', { type: 'image/jpeg' });
-        
-        const originalUpload = await uploadImage(originalFile, 'grapeguard-images', folder);
-        originalUrl = originalUpload.publicUrl;
+      const from = page * pageSize;
+      const to = from + pageSize - 1;
+
+      let query = supabaseData
+        .from('detections')
+        .select('*', { count: 'exact' })
+        .eq('firebase_user_id', firebaseUserId)
+        .order('created_at', { ascending: false })
+        .range(from, to);
+
+      if (options.type) {
+        query = query.eq('type', options.type);
       }
 
-      if (imageData.visualizationImageDataUrl) {
-        const visBlob = await dataUrlToBlob(imageData.visualizationImageDataUrl);
-        const visFile = new File([visBlob], 'visualization.jpg', { type: 'image/jpeg' });
-        
-        const visUpload = await uploadImage(visFile, 'grapeguard-images', folder);
-        visUrl = visUpload.publicUrl;
-      }
+      const { data: detections, error, count } = await query;
+      if (error) throw error;
 
-      const liveImageData = {
-        cameraNumber: imageData.cameraNumber,
-        imageUrl: originalUrl,
-        imagePath: `${folder}/original.jpg`,
-        analysisResult: imageData.result,
-        disease: imageData.result?.disease || null,
-        confidence: imageData.result?.confidence || null,
-        severity: imageData.result?.severity || null,
-        detectedRegions: imageData.result?.detectedRegions || 0,
-        modelType: imageData.result?.modelType || 'AI (HF Space)',
-        visualizationImage: visUrl,
-        driveFileName: imageData.driveFileName || null,
-        driveUploadTime: imageData.driveUploadTime || null
-      };
-
-      const savedImage = await liveMonitoringService.saveLiveImage(firebaseUserId, liveImageData);
-
-      return {
-        id: savedImage.id,
-        analysisId: analysisId,
-        ...liveImageData,
-        createdAt: savedImage.created_at
-      };
-
-    } catch (error) {
-      console.error('Live monitoring image save failed:', error);
-      throw error;
-    }
-  }
-
-  // FIXED: Get latest live images with proper error handling
-  async getLatestLiveImages(firebaseUserId, limit = 10, cameraNumber = null) {
-    if (!firebaseUserId) {
-      console.log('No firebaseUserId provided');
-      return [];
-    }
-
-    try {
-      console.log('AnalysisSupabaseService.getLatestLiveImages called:', { firebaseUserId, limit, cameraNumber });
-      
-      // Set user context for RLS
-      await this.setUserContext(firebaseUserId);
-      
-      const images = await liveMonitoringService.getLatestImages(firebaseUserId, limit, cameraNumber);
-      console.log('Retrieved images from service:', images);
-      
-      return images.map(image => ({
-        id: image.id,
-        camera: image.camera_number,
-        originalImage: image.image_url,
-        visualizationImage: image.visualization_image,
-        detection: {
-          disease: image.disease_detected,
-          confidence: image.confidence_score,
-          severity: image.severity,
-          detectedRegions: image.detected_regions
-        },
-        timestamp: image.created_at,
-        modelType: image.model_type,
-        driveFileName: image.drive_file_name,
-        driveUploadTime: image.drive_upload_time
+      const items = (detections || []).map(detection => ({
+        id: detection.id,
+        disease: detection.disease_detected,
+        confidence: detection.confidence_score,
+        severity: detection.severity,
+        timestamp: detection.created_at,
+        visualizationImage: detection.visualization_image || null,
+        originalImage: detection.image_url || null,
+        modelType: detection.model_type || 'AI (HF Space)',
+        type: detection.type,
+        camera: detection.camera
       }));
+
+      const hasMore = typeof count === 'number' ? (to + 1) < count : items.length === pageSize;
+      return { items, hasMore, total: count ?? null };
     } catch (error) {
-      console.error('Failed to get latest live images:', error);
-      // Return empty array instead of throwing to prevent UI crashes
-      return [];
-    }
-  }
-
-  // FIXED: Get latest image by camera with proper error handling
-  async getLatestImageByCamera(firebaseUserId, cameraNumber) {
-    if (!firebaseUserId) {
-      console.log('No firebaseUserId provided');
-      return null;
-    }
-
-    try {
-      console.log('AnalysisSupabaseService.getLatestImageByCamera called:', { firebaseUserId, cameraNumber });
-      
-      // Set user context for RLS
-      await this.setUserContext(firebaseUserId);
-      
-      const image = await liveMonitoringService.getLatestImageByCamera(firebaseUserId, cameraNumber);
-      console.log('Retrieved camera image from service:', image);
-      
-      if (!image) return null;
-
-      return {
-        id: image.id,
-        camera: image.camera_number,
-        originalImage: image.image_url,
-        visualizationImage: image.visualization_image,
-        detection: {
-          disease: image.disease_detected,
-          confidence: image.confidence_score,
-          severity: image.severity,
-          detectedRegions: image.detected_regions
-        },
-        timestamp: image.created_at,
-        modelType: image.model_type,
-        driveFileName: image.drive_file_name,
-        driveUploadTime: image.drive_upload_time
-      };
-    } catch (error) {
-      console.error('Failed to get latest image by camera:', error);
-      // Return null instead of throwing to prevent UI crashes
-      return null;
-    }
-  }
-
-  // FIXED: Get more live images with proper error handling
-  async getMoreLiveImages(firebaseUserId, offset = 0, limit = 10, cameraNumber = null) {
-    if (!firebaseUserId) {
-      console.log('No firebaseUserId provided');
-      return [];
-    }
-
-    try {
-      console.log('AnalysisSupabaseService.getMoreLiveImages called:', { firebaseUserId, offset, limit, cameraNumber });
-      
-      // Set user context for RLS
-      await this.setUserContext(firebaseUserId);
-      
-      const images = await liveMonitoringService.getMoreImages(firebaseUserId, offset, limit, cameraNumber);
-      console.log('Retrieved more images from service:', images);
-      
-      return images.map(image => ({
-        id: image.id,
-        camera: image.camera_number,
-        originalImage: image.image_url,
-        visualizationImage: image.visualization_image,
-        detection: {
-          disease: image.disease_detected,
-          confidence: image.confidence_score,
-          severity: image.severity,
-          detectedRegions: image.detected_regions
-        },
-        timestamp: image.created_at,
-        modelType: image.model_type,
-        driveFileName: image.drive_file_name,
-        driveUploadTime: image.drive_upload_time
-      }));
-    } catch (error) {
-      console.error('Failed to get more live images:', error);
-      // Return empty array instead of throwing to prevent UI crashes
-      return [];
+      console.error('Failed to list user analyses (paged):', error);
+      return { items: [], hasMore: false };
     }
   }
 }
