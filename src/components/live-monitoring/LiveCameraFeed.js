@@ -210,6 +210,8 @@ export default function LiveCameraFeed() {
       const start = nextDrivePage * 10;
       const end = start + 10;
       const slice = images.slice(start, end);
+      // De-dup against already-rendered items (avoid repeating same Drive file)
+      const existingIds = new Set((nextDrivePage === 0 ? [] : detectionHistory).map(it => String(it.id)));
       const mapped = await Promise.all(slice.map(async (img, idx) => {
         let dataUrl = null;
         try {
@@ -223,9 +225,13 @@ export default function LiveCameraFeed() {
           // Fallback to direct URL if conversion fails
           dataUrl = `${driveService.baseUrl}/files/${img.id}?alt=media&key=${driveService.apiKey}`;
         }
+        const computedId = `drive_${img.id}`;
+        if (existingIds.has(computedId)) {
+          return null; // skip duplicates already shown
+        }
         return {
-          id: `drive_${img.id}_${start + idx}`,
-          historyId: `drive_${img.id}_${start + idx}`,
+          id: computedId,
+          historyId: computedId,
           camera: img.name?.toLowerCase().includes('_2.jpg') ? 2 : 1,
           originalImage: dataUrl,
           visualizationImage: null,
@@ -240,6 +246,7 @@ export default function LiveCameraFeed() {
           driveFileName: img.name
         };
       }))
+      .then(list => list.filter(Boolean));
       if (nextDrivePage === 0) {
         setDetectionHistory(mapped);
       } else {
@@ -255,8 +262,38 @@ export default function LiveCameraFeed() {
     }
   };
 
-  // Disable localStorage-based history in Live Monitoring; rely on Supabase + Drive fallback only
-  const saveToHistory = () => {};
+  const saveToHistory = (results) => {
+    try {
+      const newHistoryItems = [];
+      
+      if (results.camera1) {
+        newHistoryItems.push({
+          ...results.camera1,
+          historyId: `history_${results.camera1.id}_${Date.now()}`,
+          driveUploadTime: results.camera1.imageData?.createdTime || results.camera1.timestamp,
+          driveFileName: results.camera1.imageData?.name || `camera1_${Date.now()}.jpg`
+        });
+      }
+      
+      if (results.camera2) {
+        newHistoryItems.push({
+          ...results.camera2,
+          historyId: `history_${results.camera2.id}_${Date.now() + 1}`,
+          driveUploadTime: results.camera2.imageData?.createdTime || results.camera2.timestamp,
+          driveFileName: results.camera2.imageData?.name || `camera2_${Date.now()}.jpg`
+        });
+      }
+      
+      const updatedHistory = [...newHistoryItems, ...detectionHistory];
+      setDetectionHistory(updatedHistory);
+      localStorage.setItem('liveDetectionHistory', JSON.stringify(updatedHistory));
+      
+      console.log('💾 Saved to history:', newHistoryItems.length, 'new items, total:', updatedHistory.length);
+      
+    } catch (error) {
+      console.error('Failed to save detection history:', error);
+    }
+  };
 
   const deleteIndividualHistory = (historyId) => {
     const updatedHistory = detectionHistory.filter(item => 
@@ -309,6 +346,7 @@ export default function LiveCameraFeed() {
       
       
       setCameraResults(results);
+      saveToHistory(results);
       // Persist each result to Supabase (Storage + Database)
       try {
         if (currentUser?.uid) {
@@ -432,11 +470,8 @@ export default function LiveCameraFeed() {
 
   const clearHistory = () => {
     setDetectionHistory([]);
-    setDriveCache([]);
-    setPage(0);
-    setDrivePage(0);
-    setHasMore(false);
-    console.log('🗑️ Cleared detection history (in-memory only)');
+    localStorage.removeItem('liveDetectionHistory');
+    console.log('🗑️ Cleared detection history');
   };
 
   const downloadResult = (result) => {
