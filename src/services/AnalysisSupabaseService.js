@@ -14,6 +14,7 @@ class AnalysisSupabaseService {
       result, // detection result object
       context = 'manual', // 'manual' | 'live'
       camera = null,
+      sourceMeta = null, // optional: { originDriveId, originDriveName, originCreatedTime }
     } = options;
 
     if (!firebaseUserId) {
@@ -57,7 +58,11 @@ class AnalysisSupabaseService {
         healthyArea: result?.healthyArea || null,
         modelType: result?.modelType || 'AI (HF Space)',
         visualizationImage: visUrl,
-        camera: camera
+        camera: camera,
+        // Persist origin metadata for Drive-based ingestion
+        originDriveId: sourceMeta?.originDriveId || null,
+        originDriveName: sourceMeta?.originDriveName || null,
+        originCreatedTime: sourceMeta?.originCreatedTime || null
       };
 
       const savedDetection = await detectionService.createDetection(firebaseUserId, detectionData);
@@ -160,6 +165,30 @@ class AnalysisSupabaseService {
     } catch (error) {
       console.error('Failed to list user analyses (paged):', error);
       return { items: [], hasMore: false };
+    }
+  }
+
+  // Fetch processed Drive IDs stored in analysis_result JSON
+  async listProcessedDriveIds(firebaseUserId, limit = 2000) {
+    if (!firebaseUserId) return new Set();
+    try {
+      const { data, error } = await supabaseData
+        .from('detections')
+        .select('analysis_result')
+        .eq('firebase_user_id', firebaseUserId)
+        .eq('type', 'live')
+        .not('analysis_result->>originDriveId', 'is', null)
+        .limit(limit);
+      if (error) throw error;
+      const ids = new Set();
+      (data || []).forEach(row => {
+        const originId = row?.analysis_result?.originDriveId;
+        if (originId) ids.add(originId);
+      });
+      return ids;
+    } catch (e) {
+      console.warn('Failed to fetch processed drive ids:', e?.message || e);
+      return new Set();
     }
   }
 }
