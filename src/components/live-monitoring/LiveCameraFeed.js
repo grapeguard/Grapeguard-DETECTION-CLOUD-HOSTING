@@ -74,6 +74,8 @@ export default function LiveCameraFeed() {
   const [driveFolderIndex, setDriveFolderIndex] = useState(0);
   const [drivePageToken, setDrivePageToken] = useState(null);
   const [isBackgroundSaving, setIsBackgroundSaving] = useState(false);
+  const [processedDriveIds, setProcessedDriveIds] = useState(() => new Set());
+  const DRIVE_BATCH_SIZE = 5;
 
   // Disease name mapping with multilingual support
   const getDiseaseDisplayName = (disease, currentLanguage) => {
@@ -219,9 +221,15 @@ export default function LiveCameraFeed() {
         const page = await driveService.getImagesFromFolderPage(latestDateFolder.id, undefined, 100);
         images = page.files;
         localPageToken = page.nextPageToken || null;
+        // Load processed IDs from Supabase once when entering Drive mode
+        try {
+          if (currentUser?.uid && processedDriveIds.size === 0) {
+            const ids = await analysisSupabaseService.listProcessedDriveIds(currentUser.uid);
+            setProcessedDriveIds(new Set(ids));
+          }
+        } catch (_) {}
       }
-      const start = nextDrivePage * 10;
-      let end = start + 10;
+      // Accumulate many images across folders, then take the next unseen batch of 5
       let workingImages = images.slice();
       // First, exhaust pages within the current latest folder
       if (workingImages.length < end && localFolders.length > 0) {
@@ -249,60 +257,50 @@ export default function LiveCameraFeed() {
       if (localFolders !== driveFolders) setDriveFolders(localFolders);
       if (localFolderIndex !== driveFolderIndex) setDriveFolderIndex(localFolderIndex);
       if (localPageToken !== drivePageToken) setDrivePageToken(localPageToken);
-      const slice = workingImages.slice(start, end);
-      // De-dup against already-rendered items (avoid repeating same Drive file)
-      const existingIds = new Set((nextDrivePage === 0 ? [] : detectionHistory).map(it => String(it.id)));
-      const mapped = await Promise.all(slice.map(async (img, idx) => {
-        let dataUrl = null;
+      // Select next unseen batch of DRIVE_BATCH_SIZE
+      const seen = processedDriveIds;
+      const batch = [];
+      for (const img of workingImages) {
+        if (!seen.has(img.id)) batch.push(img);
+        if (batch.length >= DRIVE_BATCH_SIZE) break;
+      }
+      const remainingAfterBatch = workingImages.filter(img => !seen.has(img.id)).length - batch.length;
+      setHasMore(remainingAfterBatch > 0 || !!localPageToken || (localFolders.length > 0 && (localFolderIndex + 1) < localFolders.length));
+
+      // If no new items found, nothing to do
+      if (batch.length === 0) {
+        setIsDriveFallback(false);
+        if (currentUser?.uid) await loadCloudHistoryPage(currentUser.uid, 0);
+        return;
+      }
+
+      // Download batch as data URLs
+      const batchPrepared = await Promise.all(batch.map(async (img) => {
+        let dataUrl;
         try {
-          // Render via data URL to avoid transient CORS/referrer issues with direct media URLs
-          dataUrl = await driveService.getImageAsDataUrl({
-            id: img.id,
-            name: img.name,
-            downloadUrl: driveService.buildDownloadUrl(img.id)
-          });
+          dataUrl = await driveService.getImageAsDataUrl({ id: img.id, name: img.name, downloadUrl: driveService.buildDownloadUrl(img.id) });
         } catch (_) {
-          // Fallback to proxy/direct URL
           dataUrl = driveService.buildDownloadUrl(img.id);
         }
-        const computedId = `drive_${img.id}`;
-        if (existingIds.has(computedId)) {
-          return null; // skip duplicates already shown
-        }
         return {
-          id: computedId,
-          historyId: computedId,
+          id: `drive_${img.id}`,
           camera: img.name?.toLowerCase().includes('_2.jpg') ? 2 : 1,
           originalImage: dataUrl,
-          visualizationImage: null,
-          detection: {
-            disease: 'Unknown',
-            confidence: 0,
-            severity: 'None',
-            detectedRegions: 0
-          },
-          timestamp: img.createdTime,
           driveUploadTime: img.createdTime,
-          driveFileName: img.name
+          driveFileName: img.name,
+          _driveId: img.id
         };
-      }))
-      .then(list => list.filter(Boolean));
-      if (nextDrivePage === 0 && !append) {
-        setDetectionHistory(mapped);
-      } else {
-        setDetectionHistory(prev => [...prev, ...mapped]);
-      }
-      setDrivePage(nextDrivePage);
-      const moreInWorking = end < workingImages.length;
-      const canPageCurrentFolder = !!localPageToken;
-      const moreFoldersRemain = localFolders.length > 0 && ((localFolderIndex + 1) < localFolders.length);
-      setHasMore(moreInWorking || canPageCurrentFolder || moreFoldersRemain);
+      }));
 
-      // Background: run AI detection and persist to Supabase for these Drive items
-      if (mapped.length > 0 && isModelLoaded && !modelError) {
+      // Background: run AI detection and persist
+      if (batchPrepared.length > 0 && isModelLoaded && !modelError) {
         try {
           setIsBackgroundSaving(true);
-          await detectAndPersistForDriveItems(mapped);
+          await detectAndPersistForDriveItems(batchPrepared);
+          // Mark processed
+          const newSet = new Set(seen);
+          batch.forEach(img => newSet.add(img.id));
+          setProcessedDriveIds(newSet);
         } catch (e) {
           console.error('Background detection for Drive items failed:', e);
         }
