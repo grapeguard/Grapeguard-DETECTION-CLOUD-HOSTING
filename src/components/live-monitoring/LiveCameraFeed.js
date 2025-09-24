@@ -373,11 +373,10 @@ export default function LiveCameraFeed() {
 
   // Detect and persist visualization for Drive fallback items
   const detectAndPersistForDriveItems = async (items) => {
-    const updates = [];
-    for (const item of items) {
+    // Process all items in parallel for speed; update UI incrementally
+    const tasks = items.map(async (item) => {
       try {
-        // Skip if already visualized
-        if (item.visualizationImage) continue;
+        if (item.visualizationImage) return null;
         const imgEl = new Image();
         const result = await new Promise((resolve, reject) => {
           imgEl.onload = async () => {
@@ -391,13 +390,12 @@ export default function LiveCameraFeed() {
           imgEl.src = item.originalImage;
         });
 
-        // Persist to Supabase for current user and use stored URLs for UI
         let storedOriginalUrl = null;
         let storedVisualizationUrl = null;
         if (currentUser?.uid) {
           try {
             const saved = await analysisSupabaseService.uploadImagesAndSave(currentUser.uid, {
-              originalImageDataUrl: item.originalImage,
+              originalImageDataUrl: result.visualizationImage ? item.originalImage : item.originalImage,
               visualizationImageDataUrl: result.visualizationImage || item.originalImage,
               result: {
                 disease: result.disease,
@@ -417,7 +415,7 @@ export default function LiveCameraFeed() {
             storedOriginalUrl = saved?.image_url || null;
             storedVisualizationUrl = saved?.visualizationImage || null;
           } catch (persistError) {
-            console.warn('Supabase persist failed for drive item', item.id, persistError?.message || persistError);
+            console.error('[Supabase] Save failed for item', item.id, persistError);
           }
         }
 
@@ -428,33 +426,25 @@ export default function LiveCameraFeed() {
           detection: result,
           timestamp: new Date().toISOString()
         };
-        updates.push(updated);
+
+        // Update UI immediately for this item
+        setDetectionHistory(prev => prev.map(it => (it.id === item.id ? updated : it)));
+        return updated;
       } catch (e) {
-        // Keep showing original image even if detection fails
         console.warn('Detection failed for drive item', item.id, e?.message || e);
+        return null;
       }
-    }
-    if (updates.length > 0) {
-      setDetectionHistory(prev => prev.map(it => {
-        const u = updates.find(x => x.id === it.id);
-        return u ? u : it;
-      }));
-      // After persisting a batch, switch back to Supabase so further pages
-      // and renders use stored visualization URLs instead of Drive originals
+    });
+
+    const results = await Promise.allSettled(tasks);
+    const anySaved = results.some(r => r.status === 'fulfilled' && r.value);
+    if (anySaved && currentUser?.uid) {
       try {
-        if (currentUser?.uid) {
-          setIsDriveFallback(false);
-          // Poll Supabase briefly to let background saves appear
-          for (let i = 0; i < 5; i++) {
-            await loadCloudHistoryPage(currentUser.uid, 0);
-            await new Promise(r => setTimeout(r, 800));
-          }
-        }
-      } catch (_) {
-        // Non-blocking
-      }
-      setIsBackgroundSaving(false);
+        setIsDriveFallback(false);
+        await loadCloudHistoryPage(currentUser.uid, 0);
+      } catch (_) {}
     }
+    setIsBackgroundSaving(false);
   };
 
   const saveToHistory = (results) => {
