@@ -333,30 +333,39 @@ export default function LiveCameraFeed() {
           imgEl.src = item.originalImage;
         });
 
+        // Persist to Supabase for current user and use stored URLs for UI
+        let storedOriginalUrl = null;
+        let storedVisualizationUrl = null;
+        if (currentUser?.uid) {
+          try {
+            const saved = await analysisSupabaseService.uploadImagesAndSave(currentUser.uid, {
+              originalImageDataUrl: item.originalImage,
+              visualizationImageDataUrl: result.visualizationImage || item.originalImage,
+              result: {
+                disease: result.disease,
+                confidence: result.confidence,
+                severity: result.severity,
+                detectedRegions: result.detectedRegions,
+                modelType: 'AI (HF Space)'
+              },
+              context: 'live',
+              camera: item.camera
+            });
+            storedOriginalUrl = saved?.image_url || null;
+            storedVisualizationUrl = saved?.visualizationImage || null;
+          } catch (persistError) {
+            console.warn('Supabase persist failed for drive item', item.id, persistError?.message || persistError);
+          }
+        }
+
         const updated = {
           ...item,
-          visualizationImage: result.visualizationImage || item.originalImage,
+          originalImage: storedOriginalUrl || item.originalImage,
+          visualizationImage: storedVisualizationUrl || result.visualizationImage || item.originalImage,
           detection: result,
           timestamp: new Date().toISOString()
         };
         updates.push(updated);
-
-        // Persist to Supabase for current user
-        if (currentUser?.uid) {
-          await analysisSupabaseService.uploadImagesAndSave(currentUser.uid, {
-            originalImageDataUrl: item.originalImage,
-            visualizationImageDataUrl: result.visualizationImage || item.originalImage,
-            result: {
-              disease: result.disease,
-              confidence: result.confidence,
-              severity: result.severity,
-              detectedRegions: result.detectedRegions,
-              modelType: 'AI (HF Space)'
-            },
-            context: 'live',
-            camera: item.camera
-          });
-        }
       } catch (e) {
         // Keep showing original image even if detection fails
         console.warn('Detection failed for drive item', item.id, e?.message || e);
