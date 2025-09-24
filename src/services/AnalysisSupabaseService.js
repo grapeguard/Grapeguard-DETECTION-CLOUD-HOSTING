@@ -29,6 +29,7 @@ class AnalysisSupabaseService {
     let visUrl = null;
 
     try {
+      // ALWAYS upload original image
       if (originalImageDataUrl) {
         const originalBlob = await dataUrlToBlob(originalImageDataUrl);
         const originalFile = new File([originalBlob], 'original.jpg', { type: 'image/jpeg' });
@@ -37,7 +38,7 @@ class AnalysisSupabaseService {
         originalUrl = originalUpload.publicUrl;
       }
 
-      // Always upload a visualization image: if not produced by AI, reuse original
+      // FIXED: Always upload visualization image - use provided one or fallback to original
       const visualizationSource = visualizationImageDataUrl || originalImageDataUrl || null;
       if (visualizationSource) {
         const visBlob = await dataUrlToBlob(visualizationSource);
@@ -46,23 +47,27 @@ class AnalysisSupabaseService {
         visUrl = visUpload.publicUrl;
       }
 
-      // Save to Supabase database
+      // FIXED: Save to Supabase database with proper field mapping
       const detectionData = {
         type: context,
         image_url: originalUrl,
         image_path: `${folder}/original.jpg`,
-        disease: result?.disease || null,
-        confidence: result?.confidence || null,
+        disease_detected: result?.disease || null, // FIXED: Use correct column name
+        confidence_score: result?.confidence || null, // FIXED: Use correct column name
         severity: result?.severity || null,
-        detectedRegions: result?.detectedRegions || 0,
-        healthyArea: result?.healthyArea || null,
-        modelType: result?.modelType || 'AI (HF Space)',
-        visualizationImage: visUrl,
+        detected_regions: result?.detectedRegions || 0, // FIXED: Use snake_case
+        healthy_area: result?.healthyArea || null, // FIXED: Use snake_case
+        model_type: result?.modelType || 'AI (HF Space)', // FIXED: Use snake_case
+        visualization_image: visUrl, // FIXED: Store visualization image URL
         camera: camera,
-        // Persist origin metadata for Drive-based ingestion
-        originDriveId: sourceMeta?.originDriveId || null,
-        originDriveName: sourceMeta?.originDriveName || null,
-        originCreatedTime: sourceMeta?.originCreatedTime || null
+        // FIXED: Store origin metadata properly
+        analysis_result: {
+          originDriveId: sourceMeta?.originDriveId || null,
+          originDriveName: sourceMeta?.originDriveName || null,
+          originCreatedTime: sourceMeta?.originCreatedTime || null,
+          // Store full result for future reference
+          ...result
+        }
       };
 
       const savedDetection = await detectionService.createDetection(firebaseUserId, detectionData);
@@ -70,6 +75,8 @@ class AnalysisSupabaseService {
       return {
         id: savedDetection.id,
         analysisId: analysisId,
+        image_url: originalUrl,
+        visualizationImage: visUrl, // Return the visualization URL
         ...detectionData,
         createdAt: savedDetection.created_at
       };
@@ -106,16 +113,17 @@ class AnalysisSupabaseService {
       
       if (error) throw error;
       
-      // Map to AnalysisHistory card format
+      // FIXED: Map with proper field names and include visualization image
       return (detections || []).map(detection => ({
         id: detection.id,
-        disease: detection.disease_detected,
-        confidence: detection.confidence_score,
+        disease: detection.disease_detected, // FIXED: Use correct column name
+        confidence: detection.confidence_score, // FIXED: Use correct column name
         severity: detection.severity,
+        detectedRegions: detection.detected_regions, // FIXED: Use snake_case
         timestamp: detection.created_at,
-        visualizationImage: detection.visualization_image || null,
+        visualizationImage: detection.visualization_image || null, // FIXED: Include visualization
         originalImage: detection.image_url || null,
-        modelType: detection.model_type || 'AI (HF Space)',
+        modelType: detection.model_type || 'AI (HF Space)', // FIXED: Use snake_case
         type: detection.type,
         camera: detection.camera
       }));
@@ -125,7 +133,7 @@ class AnalysisSupabaseService {
     }
   }
 
-  // Paginated list with explicit range and count for "Show more"
+  // FIXED: Paginated list with proper field mapping
   async listUserAnalysesPaged(firebaseUserId, pageSize = 10, page = 0, options = {}) {
     if (!firebaseUserId) return { items: [], hasMore: false };
 
@@ -147,15 +155,17 @@ class AnalysisSupabaseService {
       const { data: detections, error, count } = await query;
       if (error) throw error;
 
+      // FIXED: Map with correct field names and include visualization image
       const items = (detections || []).map(detection => ({
         id: detection.id,
-        disease: detection.disease_detected,
-        confidence: detection.confidence_score,
+        disease: detection.disease_detected, // FIXED: Use correct column name
+        confidence: detection.confidence_score, // FIXED: Use correct column name
         severity: detection.severity,
+        detectedRegions: detection.detected_regions || 0, // FIXED: Use snake_case
         timestamp: detection.created_at,
-        visualizationImage: detection.visualization_image || null,
+        visualizationImage: detection.visualization_image || null, // FIXED: Include visualization
         originalImage: detection.image_url || null,
-        modelType: detection.model_type || 'AI (HF Space)',
+        modelType: detection.model_type || 'AI (HF Space)', // FIXED: Use snake_case
         type: detection.type,
         camera: detection.camera
       }));
@@ -168,7 +178,7 @@ class AnalysisSupabaseService {
     }
   }
 
-  // Fetch processed Drive IDs stored in analysis_result JSON
+  // FIXED: Fetch processed Drive IDs from analysis_result JSON
   async listProcessedDriveIds(firebaseUserId, limit = 2000) {
     if (!firebaseUserId) return new Set();
     try {
@@ -177,14 +187,17 @@ class AnalysisSupabaseService {
         .select('analysis_result')
         .eq('firebase_user_id', firebaseUserId)
         .eq('type', 'live')
-        .not('analysis_result->>originDriveId', 'is', null)
+        .not('analysis_result->originDriveId', 'is', null) // FIXED: Use -> for JSON access
         .limit(limit);
+      
       if (error) throw error;
+      
       const ids = new Set();
       (data || []).forEach(row => {
         const originId = row?.analysis_result?.originDriveId;
         if (originId) ids.add(originId);
       });
+      
       return ids;
     } catch (e) {
       console.warn('Failed to fetch processed drive ids:', e?.message || e);
