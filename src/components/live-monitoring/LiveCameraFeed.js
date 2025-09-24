@@ -200,6 +200,34 @@ export default function LiveCameraFeed() {
 
   useEffect(() => { loadCloudHistoryPage(currentUser?.uid, 0); }, [currentUser?.uid]);
 
+  // NEW: Always surface latest 5 Drive images immediately on entering Live Monitoring
+  // so user sees them even if Supabase already has history
+  useEffect(() => {
+    // Kick off Drive loading once model tries to load (or immediately)
+    // We don't block on model availability; detection will run in background when ready
+    loadDriveRecent(0, { append: false }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // When the model becomes ready, process any Drive placeholders lacking detections
+  useEffect(() => {
+    const runPendingDetections = async () => {
+      if (!isModelLoaded || modelError) return;
+      const pending = detectionHistory.filter(it => !it.visualizationImage && it.originalImage && String(it.id || '').startsWith('drive_'));
+      if (pending.length > 0) {
+        try {
+          setIsBackgroundSaving(true);
+          await detectAndPersistForDriveItems(pending);
+        } catch (_) {
+        } finally {
+          setIsBackgroundSaving(false);
+        }
+      }
+    };
+    runPendingDetections();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isModelLoaded, modelError]);
+
   // Drive fallback: load most recent images from latest date folder
   const loadDriveRecent = async (nextDrivePage = 0, options = {}) => {
     const { append = false } = options;
@@ -289,7 +317,15 @@ export default function LiveCameraFeed() {
           originalImage: dataUrl,
           driveUploadTime: img.createdTime,
           driveFileName: img.name,
-          _driveId: img.id
+          _driveId: img.id,
+          // Placeholder detection so UI can render immediately
+          detection: {
+            disease: 'Processing... ',
+            confidence: 0,
+            severity: 'Unknown',
+            detectedRegions: 0
+          },
+          timestamp: new Date().toISOString()
         };
       }));
 
