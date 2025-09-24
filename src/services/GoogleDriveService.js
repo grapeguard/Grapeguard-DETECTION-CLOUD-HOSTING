@@ -20,7 +20,7 @@ class GoogleDriveService {
       console.log('🧪 Testing Google Drive API connection...');
       
       const response = await fetch(
-        `${this.baseUrl}/files/${this.folderId}?fields=id,name&key=${this.apiKey}`
+        `${this.baseUrl}/files/${this.folderId}?fields=id,name&supportsAllDrives=true&key=${this.apiKey}`
       );
       
       if (!response.ok) {
@@ -71,15 +71,15 @@ class GoogleDriveService {
 
   async getDateFolders() {
     try {
-      const response = await fetch(
-        `${this.baseUrl}/files?` +
+      const url = `${this.baseUrl}/files?` +
         `q='${this.folderId}' in parents and ` +
         `mimeType='application/vnd.google-apps.folder' and ` +
         `trashed=false&` +
         `orderBy=name desc&` +
         `fields=files(id,name,createdTime)&` +
-        `key=${this.apiKey}`
-      );
+        `supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives&` +
+        `key=${this.apiKey}`;
+      const response = await fetch(url);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -102,16 +102,16 @@ class GoogleDriveService {
       console.log(`📸 Getting images from folder: ${folderId}`);
       
       // Back-compat: return first page up to 100
-      const response = await fetch(
-        `${this.baseUrl}/files?` +
+      const url = `${this.baseUrl}/files?` +
         `q='${folderId}' in parents and ` +
         `mimeType contains 'image/' and ` +
         `trashed=false&` +
         `orderBy=createdTime desc&` +
         `pageSize=100&` +
         `fields=files(id,name,createdTime,size,thumbnailLink,webViewLink),nextPageToken&` +
-        `key=${this.apiKey}`
-      );
+        `supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives&` +
+        `key=${this.apiKey}`;
+      const response = await fetch(url);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -137,6 +137,9 @@ class GoogleDriveService {
       params.set('orderBy', 'createdTime desc');
       params.set('pageSize', String(pageSize));
       params.set('fields', 'files(id,name,createdTime,size,thumbnailLink,webViewLink),nextPageToken');
+      params.set('supportsAllDrives', 'true');
+      params.set('includeItemsFromAllDrives', 'true');
+      params.set('corpora', 'allDrives');
       params.set('key', this.apiKey);
       if (pageToken) params.set('pageToken', pageToken);
       const url = `${this.baseUrl}/files?${params.toString()}`;
@@ -209,8 +212,12 @@ class GoogleDriveService {
   async downloadImageAsBlob(imageData) {
     try {
       console.log(`⬇️ Downloading image: ${imageData.name}`);
-      
-      const response = await fetch(imageData.downloadUrl, { mode: 'cors' });
+      // Build a valid download URL if not provided
+      const url = imageData.downloadUrl || this.buildDownloadUrl(imageData.id);
+      if (!url) {
+        throw new Error('Missing download URL and file id');
+      }
+      const response = await fetch(url, { mode: 'cors' });
       
       if (!response.ok) {
         throw new Error(`Download failed: ${response.status}`);
@@ -229,14 +236,36 @@ class GoogleDriveService {
 
   async getImageAsDataUrl(imageData) {
     try {
-      const blob = await this.downloadImageAsBlob(imageData);
-      
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = reject;
-        reader.readAsDataURL(blob);
-      });
+      // First try the direct content URL
+      try {
+        const blob = await this.downloadImageAsBlob(imageData);
+        return await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      } catch (primaryErr) {
+        // Fallback: try thumbnailLink (usually public, lower resolution)
+        if (imageData.thumbnailLink) {
+          try {
+            const thumbUrl = imageData.thumbnailLink;
+            const res = await fetch(thumbUrl, { mode: 'cors' });
+            if (!res.ok) throw new Error(`Thumbnail fetch failed: ${res.status}`);
+            const blob = await res.blob();
+            return await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result);
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
+            });
+          } catch (thumbErr) {
+            console.warn('Thumbnail fallback failed:', thumbErr?.message || thumbErr);
+            throw primaryErr; // rethrow original error
+          }
+        }
+        throw primaryErr;
+      }
       
     } catch (error) {
       console.error(`❌ Failed to convert ${imageData.name} to data URL:`, error);
@@ -250,7 +279,8 @@ class GoogleDriveService {
       const base = this.proxyBase.replace(/\/$/, '');
       return `${base}/drive/file/${encodeURIComponent(fileId)}`;
     }
-    return `${this.baseUrl}/files/${fileId}?alt=media&key=${this.apiKey}`;
+    // Include supportsAllDrives to enable Shared Drives access
+    return `${this.baseUrl}/files/${fileId}?alt=media&supportsAllDrives=true&key=${this.apiKey}`;
   }
 }
 
