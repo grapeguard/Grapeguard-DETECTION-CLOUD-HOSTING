@@ -200,6 +200,18 @@ export default function LiveCameraFeed() {
 
   useEffect(() => { loadCloudHistoryPage(currentUser?.uid, 0); }, [currentUser?.uid]);
 
+  // Reset Drive-related state when user switches to prevent cross-user mixing
+  useEffect(() => {
+    setDriveCache([]);
+    setDriveFolders([]);
+    setDriveFolderIndex(0);
+    setDrivePageToken(null);
+    setDrivePage(0);
+    setProcessedDriveIds(new Set());
+    setDetectionHistory([]);
+    setIsDriveFallback(false);
+  }, [currentUser?.uid]);
+
   // NEW: Always surface latest 5 Drive images immediately on entering Live Monitoring
   // so user sees them even if Supabase already has history
   useEffect(() => {
@@ -304,12 +316,13 @@ export default function LiveCameraFeed() {
       }
 
       // Download batch as data URLs
-      const batchPrepared = await Promise.all(batch.map(async (img) => {
+      const batchPrepared = (await Promise.all(batch.map(async (img) => {
         let dataUrl;
         try {
           dataUrl = await driveService.getImageAsDataUrl({ id: img.id, name: img.name, downloadUrl: driveService.buildDownloadUrl(img.id) });
         } catch (_) {
-          dataUrl = driveService.buildDownloadUrl(img.id);
+          // Skip items that cannot be fetched (404/private) to avoid broken images
+          return null;
         }
         return {
           id: `drive_${img.id}`,
@@ -325,9 +338,10 @@ export default function LiveCameraFeed() {
             severity: 'Unknown',
             detectedRegions: 0
           },
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          _uid: currentUser?.uid || 'anon'
         };
-      }));
+      }))).filter(Boolean);
 
       // Immediately surface placeholders in UI so user sees latest 5 images
       if (batchPrepared.length > 0) {
