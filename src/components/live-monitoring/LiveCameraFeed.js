@@ -23,7 +23,8 @@ import {
   CheckCircle as CheckCircleIcon,
   Error as ErrorIcon,
   Delete as DeleteIcon,
-  Refresh as RefreshIcon
+  Refresh as RefreshIcon,
+  OpenInNew as OpenInNewIcon
 } from '@mui/icons-material';
 import { useTranslation } from '../../context/LanguageContext';
 import GoogleDriveService from '../../services/GoogleDriveService';
@@ -44,6 +45,7 @@ export default function LiveCameraFeed() {
   const [processingProgress, setProcessingProgress] = useState(0);
   const [autoMonitoringEnabled, setAutoMonitoringEnabled] = useState(false);
   const [lastProcessedTime, setLastProcessedTime] = useState(null);
+  const [hasMoreDisplay, setHasMoreDisplay] = useState(true);
   
   // Helper function to get translated severity label
   const getSeverityLabel = (severity) => {
@@ -273,6 +275,17 @@ export default function LiveCameraFeed() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser?.uid, isModelLoaded]);
+
+  // Check if more unprocessed images exist on Drive
+  const probeHasMore = async () => {
+    if (!currentUser?.uid) return;
+    try {
+      const next = await liveMonitoringService.getUnprocessedImages(currentUser.uid, 1);
+      setHasMoreDisplay((next || []).length > 0);
+    } catch (_) {
+      setHasMoreDisplay(false);
+    }
+  };
 
   // When the model becomes ready, process any Drive placeholders lacking detections
   useEffect(() => {
@@ -751,6 +764,26 @@ export default function LiveCameraFeed() {
             </Box>
             <Box display="flex" gap={1} alignItems="center">
               <Button
+                variant="outlined"
+                size="small"
+                onClick={async () => {
+                  if (!currentUser?.uid) return;
+                  try {
+                    setIsLoadingPage(true);
+                    const out = await liveMonitoringService.processStrictLatest(currentUser.uid, 5);
+                    await loadCloudHistoryPage(currentUser.uid, 0);
+                    setLastProcessedTime(new Date().toISOString());
+                    await probeHasMore();
+                  } catch (e) {
+                    setError(e?.message || 'Failed to fetch latest');
+                  } finally {
+                    setIsLoadingPage(false);
+                  }
+                }}
+              >
+                {t('fetchLatest') || 'Fetch Latest (Newest 5)'}
+              </Button>
+              <Button
                 variant={autoMonitoringEnabled ? 'contained' : 'outlined'}
                 color={autoMonitoringEnabled ? 'primary' : 'inherit'}
                 onClick={() => {
@@ -937,53 +970,81 @@ export default function LiveCameraFeed() {
                         </Typography>
                         
                         {/* Severity and Status Chips - Using translated severity labels */}
-                        <Box display="flex" gap={0.5} flexWrap="wrap" style={{ marginTop: 'auto' }}>
+                      <Box display="flex" gap={0.5} flexWrap="wrap" style={{ marginTop: 'auto' }}>
+                        <Chip
+                          label={getSeverityLabel(result.detection.severity)}
+                          size="small"
+                          color={
+                            result.detection.severity === 'High' ? 'error' :
+                            result.detection.severity === 'Medium' ? 'warning' :
+                            result.detection.severity === 'None' ? 'success' : 'default'
+                          }
+                        />
+                        {result.detection.detectedRegions > 0 && (
                           <Chip
-                            label={getSeverityLabel(result.detection.severity)}
-                            size="small"
-                            color={
-                              result.detection.severity === 'High' ? 'error' :
-                              result.detection.severity === 'Medium' ? 'warning' :
-                              result.detection.severity === 'None' ? 'success' : 'default'
-                            }
-                          />
-                          {result.detection.detectedRegions > 0 && (
-                            <Chip
-                              label={`${formatSensorValue(result.detection.detectedRegions, 0)} ${t('regions')}`}
-                              size="small"
-                              variant="outlined"
-                            />
-                          )}
-                          <Chip
-                            label="AI"
+                            label={`${formatSensorValue(result.detection.detectedRegions, 0)} ${t('regions')}`}
                             size="small"
                             variant="outlined"
-                            style={{ fontSize: '0.7rem' }}
                           />
+                        )}
+                        <Chip
+                          label="AI"
+                          size="small"
+                          variant="outlined"
+                          style={{ fontSize: '0.7rem' }}
+                        />
+                        {/* Links to stored images when available (public Supabase URLs) */}
+                        <Box display="flex" gap={0.5} width="100%" mt={0.5}>
+                          {result.originalImage && result.originalImage.startsWith('http') && (
+                            <Button href={result.originalImage} target="_blank" rel="noreferrer" size="small" endIcon={<OpenInNewIcon />}>
+                              {t('original') || 'Original'}
+                            </Button>
+                          )}
+                          {result.visualizationImage && result.visualizationImage.startsWith('http') && (
+                            <Button href={result.visualizationImage} target="_blank" rel="noreferrer" size="small" endIcon={<OpenInNewIcon />}>
+                              {t('visualization') || 'Visualization'}
+                            </Button>
+                          )}
                         </Box>
-                      </CardContent>
-                    </Card>
-                  </Grid>
-                );
-              })}
-            </Grid>
-          )}
+                      </Box>
+                    </CardContent>
+                  </Card>
+                </Grid>
+              );
+            })}
+          </Grid>
+        )}
 
-          {/* Auto Processing Status */}
-          {isAutoProcessing && (
-            <Box display="flex" alignItems="center" justifyContent="center" mt={2} mb={2}>
-              <CircularProgress size={20} style={{ marginRight: '0.5rem' }} />
-              <Typography variant="body2" color="primary">
-                {t('processingImages') || 'Processing latest images...'} {processingProgress > 0 && `(${processingProgress}%)`}
-              </Typography>
-            </Box>
-          )}
+        {/* Fetch Latest button */}
+        <Box textAlign="center" mt={2}>
+          <Button
+            variant="contained"
+            onClick={async () => {
+              if (currentUser?.uid) {
+                try {
+                  setIsLoadingPage(true);
+                  const out = await liveMonitoringService.processStrictLatest(currentUser.uid, 5);
+                  await loadCloudHistoryPage(currentUser.uid, 0);
+                  setLastProcessedTime(new Date().toISOString());
+                  await probeHasMore();
+                } catch (e) {
+                  setError(e?.message || 'Failed to fetch latest');
+                } finally {
+                  setIsLoadingPage(false);
+                }
+              }
+            }}
+          >
+            {t('fetchLatest') || 'Fetch Latest (Newest 5)'}
+          </Button>
+        </Box>
 
-          {/* Show more pagination with enhanced functionality */}
-          {detectionHistory.length > 0 && (
-            <Box display="flex" justifyContent="center" gap={2} mt={3}>
-              <Button
-                variant="outlined"
+        {/* Remove stray, duplicated Auto Processing Status fragment */}
+        
+        {/* Show more pagination with enhanced functionality */}
+        {detectionHistory.length > 0 && (
+          <Box display="flex" justifyContent="center" gap={2} mt={3}>
+            <Button
                 onClick={async () => {
                   if (currentUser?.uid) {
                     try {
@@ -995,6 +1056,7 @@ export default function LiveCameraFeed() {
                         // Refresh the entire history to show new results
                         await loadCloudHistoryPage(currentUser.uid, 0);
                         setDrivePage(prev => prev + 1);
+                        await probeHasMore();
                       } else {
                         // Fallback to old pagination method
                         if (isDriveFallback) {
@@ -1003,6 +1065,8 @@ export default function LiveCameraFeed() {
                           setIsDriveFallback(true);
                           loadDriveRecent(0, { append: true });
                         }
+                        // Also probe hasMore
+                        await probeHasMore();
                       }
                     } catch (error) {
                       console.error('❌ Show more failed:', error);
@@ -1012,10 +1076,10 @@ export default function LiveCameraFeed() {
                     }
                   }
                 }}
-                disabled={isLoadingPage || isAutoProcessing}
+                disabled={isLoadingPage || isAutoProcessing || !hasMoreDisplay}
                 startIcon={isLoadingPage ? <CircularProgress size={16} /> : null}
               >
-                {isLoadingPage ? (t('processing') || 'Processing...') : (t('showMore') || 'Show More (Process Next 5)')}
+                {isLoadingPage ? (t('processing') || 'Processing...') : (hasMoreDisplay ? (t('showMore') || 'Show More (Process Next 5)') : (t('noMore') || 'No more'))}
               </Button>
               
               <Button
