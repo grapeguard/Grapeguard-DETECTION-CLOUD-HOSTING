@@ -376,6 +376,16 @@ export default function LiveCameraFeed() {
         const u = updates.find(x => x.id === it.id);
         return u ? u : it;
       }));
+      // After persisting a batch, switch back to Supabase so further pages
+      // and renders use stored visualization URLs instead of Drive originals
+      try {
+        if (currentUser?.uid) {
+          setIsDriveFallback(false);
+          await loadCloudHistoryPage(currentUser.uid, 0);
+        }
+      } catch (_) {
+        // Non-blocking
+      }
     }
   };
 
