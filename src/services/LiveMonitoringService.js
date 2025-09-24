@@ -1,214 +1,358 @@
-// Live Monitoring Service for managing live camera images and analysis results
+// Enhanced Live Monitoring Service for ESP32 → Drive → Supabase → Detection Flow
 // src/services/LiveMonitoringService.js
 
-import { supabaseData, uploadImage } from './supabaseData';
-import { v4 as uuidv4 } from 'uuid';
-
-async function dataUrlToBlob(dataUrl) {
-  const res = await fetch(dataUrl);
-  return await res.blob();
-}
+import GoogleDriveService from './GoogleDriveService';
+import DetectronDiseaseService from './DetectronDiseaseService';
+import analysisSupabaseService from './AnalysisSupabaseService';
 
 class LiveMonitoringService {
-  // Save live monitoring image with analysis result
-  async saveLiveImage(firebaseUserId, options) {
-    const {
-      originalImageDataUrl,
-      visualizationImageDataUrl,
-      analysisResult,
-      cameraNumber,
-      driveFileName,
-      driveUploadTime
-    } = options;
-
-    if (!firebaseUserId) {
-      throw new Error('Missing firebaseUserId');
-    }
-
-    const imageId = uuidv4();
-    const folder = `live-monitoring/${firebaseUserId}/${imageId}`;
-
-    // Upload images to Supabase Storage
-    let originalUrl = null;
-    let visUrl = null;
-
-    try {
-      if (originalImageDataUrl) {
-        const originalBlob = await dataUrlToBlob(originalImageDataUrl);
-        const originalFile = new File([originalBlob], 'original.jpg', { type: 'image/jpeg' });
-        
-        const originalUpload = await uploadImage(originalFile, 'grapeguard-images', folder);
-        originalUrl = originalUpload.publicUrl;
-      }
-
-      if (visualizationImageDataUrl) {
-        const visBlob = await dataUrlToBlob(visualizationImageDataUrl);
-        const visFile = new File([visBlob], 'visualization.jpg', { type: 'image/jpeg' });
-        
-        const visUpload = await uploadImage(visFile, 'grapeguard-images', folder);
-        visUrl = visUpload.publicUrl;
-      }
-
-      // Save to live_monitoring_images table
-      const { data, error } = await supabaseData
-        .from('live_monitoring_images')
-        .insert([{
-          firebase_user_id: firebaseUserId,
-          camera_number: cameraNumber,
-          image_url: originalUrl,
-          image_path: `${folder}/original.jpg`,
-          analysis_result: analysisResult,
-          disease_detected: analysisResult?.disease || null,
-          confidence_score: analysisResult?.confidence || null,
-          severity: analysisResult?.severity || null,
-          detected_regions: analysisResult?.detectedRegions || 0,
-          model_type: analysisResult?.modelType || 'AI (HF Space)',
-          visualization_image: visUrl,
-          drive_file_name: driveFileName,
-          drive_upload_time: driveUploadTime,
-          status: 'completed'
-        }])
-        .select()
-        .single();
-
-      if (error) throw error;
-
-      return {
-        id: data.id,
-        imageId: imageId,
-        ...data,
-        createdAt: data.created_at
-      };
-
-    } catch (error) {
-      console.error('Live monitoring save failed:', error);
-      throw error;
-    }
-  }
-
-  // Get recent live monitoring images for a user
-  async getRecentLiveImages(firebaseUserId, limit = 10, cameraNumber = null) {
-    if (!firebaseUserId) return [];
+  constructor() {
+    this.driveService = new GoogleDriveService();
+    this.detectionService = new DetectronDiseaseService();
+    this.processedImages = new Set(); // Track processed image IDs to avoid duplicates
+    this.isProcessing = false;
+    this.pollingInterval = null;
+    this.BATCH_SIZE = 5; // Process 5 images at a time
     
-    try {
-      let query = supabaseData
-        .from('live_monitoring_images')
-        .select('*')
-        .eq('firebase_user_id', firebaseUserId)
-        .order('created_at', { ascending: false })
-        .limit(limit);
+    console.log('🚀 LiveMonitoringService initialized');
+  }
 
-      if (cameraNumber) {
-        query = query.eq('camera_number', cameraNumber);
+  /**
+   * Initialize the service and load AI model
+   */
+  async initialize() {
+    try {
+      console.log('🤖 Initializing Live Monitoring Service...');
+      
+      // Load AI detection model
+      const modelLoaded = await this.detectionService.loadModel();
+      if (!modelLoaded) {
+        throw new Error('Failed to load AI detection model');
       }
-
-      const { data: images, error } = await query;
       
-      if (error) throw error;
-      
-      return (images || []).map(image => ({
-        id: image.id,
-        camera: image.camera_number,
-        originalImage: image.image_url,
-        visualizationImage: image.visualization_image,
-        detection: {
-          disease: image.disease_detected,
-          confidence: image.confidence_score,
-          severity: image.severity,
-          detectedRegions: image.detected_regions
-        },
-        timestamp: image.created_at,
-        driveUploadTime: image.drive_upload_time,
-        driveFileName: image.drive_file_name,
-        modelType: image.model_type,
-        type: 'live'
-      }));
-    } catch (error) {
-      console.error('Failed to get recent live images:', error);
-      return [];
-    }
-  }
-
-  // Get latest image for each camera
-  async getLatestCameraImages(firebaseUserId) {
-    if (!firebaseUserId) return { camera1: null, camera2: null };
-    
-    try {
-      const [camera1Result, camera2Result] = await Promise.all([
-        this.getRecentLiveImages(firebaseUserId, 1, 1),
-        this.getRecentLiveImages(firebaseUserId, 1, 2)
-      ]);
-
-      return {
-        camera1: camera1Result[0] || null,
-        camera2: camera2Result[0] || null
-      };
-    } catch (error) {
-      console.error('Failed to get latest camera images:', error);
-      return { camera1: null, camera2: null };
-    }
-  }
-
-  // Get more live monitoring images (for SHOW MORE functionality)
-  async getMoreLiveImages(firebaseUserId, offset = 0, limit = 10, cameraNumber = null) {
-    if (!firebaseUserId) return [];
-    
-    try {
-      let query = supabaseData
-        .from('live_monitoring_images')
-        .select('*')
-        .eq('firebase_user_id', firebaseUserId)
-        .order('created_at', { ascending: false })
-        .range(offset, offset + limit - 1);
-
-      if (cameraNumber) {
-        query = query.eq('camera_number', cameraNumber);
-      }
-
-      const { data: images, error } = await query;
-      
-      if (error) throw error;
-      
-      return (images || []).map(image => ({
-        id: image.id,
-        camera: image.camera_number,
-        originalImage: image.image_url,
-        visualizationImage: image.visualization_image,
-        detection: {
-          disease: image.disease_detected,
-          confidence: image.confidence_score,
-          severity: image.severity,
-          detectedRegions: image.detected_regions
-        },
-        timestamp: image.created_at,
-        driveUploadTime: image.drive_upload_time,
-        driveFileName: image.drive_file_name,
-        modelType: image.model_type,
-        type: 'live'
-      }));
-    } catch (error) {
-      console.error('Failed to get more live images:', error);
-      return [];
-    }
-  }
-
-  // Delete a live monitoring image
-  async deleteLiveImage(firebaseUserId, imageId) {
-    try {
-      const { error } = await supabaseData
-        .from('live_monitoring_images')
-        .delete()
-        .eq('id', imageId)
-        .eq('firebase_user_id', firebaseUserId);
-
-      if (error) throw error;
+      console.log('✅ Live Monitoring Service ready');
       return true;
     } catch (error) {
-      console.error('Failed to delete live image:', error);
+      console.error('❌ Failed to initialize Live Monitoring Service:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Start automatic monitoring of ESP32 images
+   * @param {string} userId - Firebase user ID
+   * @param {number} intervalMs - Polling interval in milliseconds (default: 30 seconds)
+   */
+  startAutoMonitoring(userId, intervalMs = 30000) {
+    if (this.pollingInterval) {
+      this.stopAutoMonitoring();
+    }
+
+    console.log(`🔄 Starting auto monitoring for user ${userId} (interval: ${intervalMs}ms)`);
+    
+    // Process immediately
+    this.processLatestImages(userId);
+    
+    // Set up polling
+    this.pollingInterval = setInterval(() => {
+      this.processLatestImages(userId);
+    }, intervalMs);
+  }
+
+  /**
+   * Stop automatic monitoring
+   */
+  stopAutoMonitoring() {
+    if (this.pollingInterval) {
+      clearInterval(this.pollingInterval);
+      this.pollingInterval = null;
+      console.log('⏹️ Auto monitoring stopped');
+    }
+  }
+
+  /**
+   * Process latest images from ESP32 cameras
+   * @param {string} userId - Firebase user ID
+   * @param {number} batchSize - Number of images to process
+   * @returns {Promise<Array>} Processed results
+   */
+  async processLatestImages(userId, batchSize = this.BATCH_SIZE) {
+    if (this.isProcessing) {
+      console.log('⏳ Already processing images, skipping...');
+      return [];
+    }
+
+    this.isProcessing = true;
+    const results = [];
+
+    try {
+      console.log(`🔍 Processing latest ${batchSize} images for user ${userId}...`);
+
+      // Get latest images from Drive
+      const latestImages = await this.getUnprocessedImages(userId, batchSize);
+      
+      if (latestImages.length === 0) {
+        console.log('📭 No new images to process');
+        return [];
+      }
+
+      console.log(`📸 Found ${latestImages.length} new images to process`);
+
+      // Process images in parallel for better performance
+      const processingPromises = latestImages.map(imageData => 
+        this.processIndividualImage(userId, imageData)
+      );
+
+      const processedResults = await Promise.allSettled(processingPromises);
+      
+      // Collect successful results
+      processedResults.forEach((result, index) => {
+        if (result.status === 'fulfilled' && result.value) {
+          results.push(result.value);
+          // Mark as processed
+          this.processedImages.add(latestImages[index].id);
+        } else {
+          console.error(`❌ Failed to process image ${latestImages[index].name}:`, result.reason);
+        }
+      });
+
+      console.log(`✅ Successfully processed ${results.length}/${latestImages.length} images`);
+      return results;
+
+    } catch (error) {
+      console.error('❌ Error in processLatestImages:', error);
+      return [];
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+
+  /**
+   * Get unprocessed images from Drive
+   * @param {string} userId - Firebase user ID
+   * @param {number} limit - Maximum number of images to fetch
+   * @returns {Promise<Array>} Array of image data
+   */
+  async getUnprocessedImages(userId, limit = this.BATCH_SIZE) {
+    try {
+      // Get processed image IDs from Supabase to avoid reprocessing
+      if (this.processedImages.size === 0) {
+        const processedIds = await analysisSupabaseService.listProcessedDriveIds(userId);
+        processedIds.forEach(id => this.processedImages.add(id));
+        console.log(`📋 Loaded ${processedIds.size} previously processed image IDs`);
+      }
+
+      // Get latest date folders from Drive
+      const dateFolders = await this.driveService.getDateFolders();
+      if (dateFolders.length === 0) {
+        return [];
+      }
+
+      const unprocessedImages = [];
+      
+      // Search through date folders (newest first) until we have enough unprocessed images
+      for (const folder of dateFolders) {
+        if (unprocessedImages.length >= limit) break;
+
+        const folderImages = await this.driveService.getImagesFromFolder(folder.id);
+        
+        // Filter out already processed images
+        const newImages = folderImages.filter(img => 
+          !this.processedImages.has(img.id) && 
+          (img.name.toLowerCase().includes('_1.jpg') || img.name.toLowerCase().includes('_2.jpg'))
+        );
+
+        unprocessedImages.push(...newImages);
+        
+        // Sort by creation time (newest first) and limit
+        unprocessedImages.sort((a, b) => new Date(b.createdTime) - new Date(a.createdTime));
+        
+        if (unprocessedImages.length > limit) {
+          unprocessedImages.splice(limit);
+        }
+      }
+
+      return unprocessedImages.slice(0, limit);
+
+    } catch (error) {
+      console.error('❌ Error getting unprocessed images:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Process individual image: Download → Upload to Supabase → Detect → Store
+   * @param {string} userId - Firebase user ID
+   * @param {Object} imageData - Drive image data
+   * @returns {Promise<Object>} Processing result
+   */
+  async processIndividualImage(userId, imageData) {
+    try {
+      console.log(`🔬 Processing image: ${imageData.name}`);
+
+      // Step 1: Download image from Drive as data URL
+      const imageDataUrl = await this.driveService.getImageAsDataUrl(imageData);
+      
+      // Step 2: Run AI detection
+      const img = new Image();
+      const detectionResult = await new Promise((resolve, reject) => {
+        img.onload = async () => {
+          try {
+            const result = await this.detectionService.predict(img, true);
+            resolve(result);
+          } catch (error) {
+            reject(error);
+          }
+        };
+        img.onerror = () => reject(new Error('Image loading failed'));
+        img.crossOrigin = 'anonymous';
+        img.src = imageDataUrl;
+      });
+
+      // Step 3: Determine camera number from filename
+      const cameraNumber = imageData.name.toLowerCase().includes('_2.jpg') ? 2 : 1;
+
+      // Step 4: Upload to Supabase and store detection result
+      const savedResult = await analysisSupabaseService.uploadImagesAndSave(userId, {
+        originalImageDataUrl: imageDataUrl,
+        visualizationImageDataUrl: detectionResult.visualizationImage || imageDataUrl,
+        result: {
+          disease: detectionResult.disease,
+          confidence: detectionResult.confidence,
+          severity: detectionResult.severity,
+          detectedRegions: detectionResult.detectedRegions || 0,
+          modelType: 'AI (HF Space)'
+        },
+        context: 'live',
+        camera: cameraNumber,
+        sourceMeta: {
+          originDriveId: imageData.id,
+          originDriveName: imageData.name,
+          originCreatedTime: imageData.createdTime
+        }
+      });
+
+      // Step 5: Return formatted result for UI
+      const result = {
+        id: savedResult.id,
+        historyId: `sb_${savedResult.id}`,
+        camera: cameraNumber,
+        originalImage: savedResult.image_url,
+        visualizationImage: savedResult.visualizationImage,
+        detection: {
+          disease: detectionResult.disease,
+          confidence: detectionResult.confidence,
+          severity: detectionResult.severity,
+          detectedRegions: detectionResult.detectedRegions || 0
+        },
+        timestamp: savedResult.createdAt || new Date().toISOString(),
+        driveUploadTime: imageData.createdTime,
+        driveFileName: imageData.name,
+        modelType: 'AI (HF Space)'
+      };
+
+      console.log(`✅ Successfully processed ${imageData.name}: ${detectionResult.disease} (${detectionResult.confidence}%)`);
+      return result;
+
+    } catch (error) {
+      console.error(`❌ Failed to process image ${imageData.name}:`, error);
       throw error;
     }
+  }
+
+  /**
+   * Get recent analysis results for Live Monitoring display
+   * @param {string} userId - Firebase user ID
+   * @param {number} limit - Number of results to fetch
+   * @returns {Promise<Array>} Recent analysis results
+   */
+  async getRecentAnalysis(userId, limit = 5) {
+    try {
+      const { items } = await analysisSupabaseService.listUserAnalysesPaged(userId, limit, 0, { type: 'live' });
+      
+      return items.map(item => ({
+        id: item.id,
+        historyId: `sb_${item.id}`,
+        camera: item.camera,
+        originalImage: item.originalImage,
+        visualizationImage: item.visualizationImage,
+        detection: {
+          disease: item.disease,
+          confidence: item.confidence,
+          severity: item.severity,
+          detectedRegions: item.detectedRegions || 0
+        },
+        timestamp: item.timestamp,
+        modelType: item.modelType || 'AI (HF Space)'
+      }));
+    } catch (error) {
+      console.error('❌ Error getting recent analysis:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Process next batch of images (for "Show More" functionality)
+   * @param {string} userId - Firebase user ID
+   * @param {number} page - Page number (0-based)
+   * @returns {Promise<Array>} Next batch of processed images
+   */
+  async processNextBatch(userId, page = 0) {
+    console.log(`📄 Processing next batch (page ${page}) for user ${userId}...`);
+    
+    // Calculate offset based on page
+    const offset = page * this.BATCH_SIZE;
+    
+    // Get next batch of unprocessed images
+    const nextImages = await this.getUnprocessedImages(userId, this.BATCH_SIZE);
+    
+    if (nextImages.length === 0) {
+      console.log('📭 No more images to process');
+      return [];
+    }
+
+    // Process the batch
+    return await this.processLatestImages(userId, nextImages.length);
+  }
+
+  /**
+   * Check if service is currently processing
+   * @returns {boolean} Processing status
+   */
+  isCurrentlyProcessing() {
+    return this.isProcessing;
+  }
+
+  /**
+   * Get processing statistics
+   * @returns {Object} Statistics object
+   */
+  getStats() {
+    return {
+      processedImagesCount: this.processedImages.size,
+      isProcessing: this.isProcessing,
+      isAutoMonitoring: !!this.pollingInterval
+    };
+  }
+
+  /**
+   * Reset processed images cache (useful for testing)
+   */
+  resetProcessedCache() {
+    this.processedImages.clear();
+    console.log('🔄 Processed images cache reset');
+  }
+
+  /**
+   * Cleanup resources
+   */
+  destroy() {
+    this.stopAutoMonitoring();
+    this.processedImages.clear();
+    console.log('🧹 LiveMonitoringService destroyed');
   }
 }
 
+// Create singleton instance
 const liveMonitoringService = new LiveMonitoringService();
 export default liveMonitoringService;
