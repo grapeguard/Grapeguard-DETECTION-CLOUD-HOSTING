@@ -204,42 +204,50 @@ export default function LiveCameraFeed() {
       setIsLoadingPage(true);
       setIsDriveFallback(true);
       let images = driveCache;
+      // Use local copies to traverse folders within this call (React state updates are async)
+      let localFolders = driveFolders;
+      let localFolderIndex = driveFolderIndex;
+      let localPageToken = drivePageToken;
+
       if (images.length === 0) {
-        const dateFolders = await driveService.getDateFolders();
-        if (!dateFolders || dateFolders.length === 0) { setDetectionHistory([]); setHasMore(false); return; }
-        setDriveFolders(dateFolders);
-        setDriveFolderIndex(0);
-        const latestDateFolder = dateFolders[0];
+        const fetchedFolders = await driveService.getDateFolders();
+        if (!fetchedFolders || fetchedFolders.length === 0) { setDetectionHistory([]); setHasMore(false); return; }
+        localFolders = fetchedFolders;
+        localFolderIndex = 0;
+        const latestDateFolder = localFolders[0];
         const page = await driveService.getImagesFromFolderPage(latestDateFolder.id, undefined, 100);
         images = page.files;
-        setDriveCache(images);
-        setDrivePageToken(page.nextPageToken || null);
+        localPageToken = page.nextPageToken || null;
       }
       const start = nextDrivePage * 10;
       let end = start + 10;
       let workingImages = images.slice();
       // First, exhaust pages within the current latest folder
-      if (workingImages.length < end && driveFolders.length > 0) {
-        const currentFolder = driveFolders[driveFolderIndex] || driveFolders[0];
-        while (drivePageToken && workingImages.length < end) {
-          const page = await driveService.getImagesFromFolderPage(currentFolder.id, drivePageToken, 100);
+      if (workingImages.length < end && localFolders.length > 0) {
+        const currentFolder = localFolders[localFolderIndex] || localFolders[0];
+        while (localPageToken && workingImages.length < end) {
+          const page = await driveService.getImagesFromFolderPage(currentFolder.id, localPageToken, 100);
           workingImages = workingImages.concat(page.files);
-          setDrivePageToken(page.nextPageToken || null);
+          localPageToken = page.nextPageToken || null;
         }
       }
       // Then, move to older folders if still not enough
-      while (workingImages.length < end && driveFolders.length > 0 && (driveFolderIndex + 1) < driveFolders.length) {
-        const nextIdx = driveFolderIndex + 1;
-        const nextFolder = driveFolders[nextIdx];
+      while (workingImages.length < end && localFolders.length > 0 && (localFolderIndex + 1) < localFolders.length) {
+        const nextIdx = localFolderIndex + 1;
+        const nextFolder = localFolders[nextIdx];
         const page = await driveService.getImagesFromFolderPage(nextFolder.id, undefined, 100);
         workingImages = workingImages.concat(page.files);
-        setDriveFolderIndex(nextIdx);
-        setDrivePageToken(page.nextPageToken || null);
+        localFolderIndex = nextIdx;
+        localPageToken = page.nextPageToken || null;
       }
       // Update cache
       if (workingImages.length !== driveCache.length) {
         setDriveCache(workingImages);
       }
+      // Persist traversal state back to React state
+      if (localFolders !== driveFolders) setDriveFolders(localFolders);
+      if (localFolderIndex !== driveFolderIndex) setDriveFolderIndex(localFolderIndex);
+      if (localPageToken !== drivePageToken) setDrivePageToken(localPageToken);
       const slice = workingImages.slice(start, end);
       // De-dup against already-rendered items (avoid repeating same Drive file)
       const existingIds = new Set((nextDrivePage === 0 ? [] : detectionHistory).map(it => String(it.id)));
@@ -285,8 +293,8 @@ export default function LiveCameraFeed() {
       }
       setDrivePage(nextDrivePage);
       const moreInWorking = end < workingImages.length;
-      const canPageCurrentFolder = !!drivePageToken;
-      const moreFoldersRemain = driveFolders.length > 0 && ((driveFolderIndex + 1) < driveFolders.length);
+      const canPageCurrentFolder = !!localPageToken;
+      const moreFoldersRemain = localFolders.length > 0 && ((localFolderIndex + 1) < localFolders.length);
       setHasMore(moreInWorking || canPageCurrentFolder || moreFoldersRemain);
 
       // Background: run AI detection and persist to Supabase for these Drive items
@@ -819,7 +827,7 @@ export default function LiveCameraFeed() {
                     loadDriveRecent(0, { append: true });
                   }
                 }}
-                disabled={isLoadingPage || (isDriveFallback ? !hasMore : false)}
+                disabled={!hasMore || isLoadingPage}
               >
                 {isLoadingPage ? t('loading') || 'Loading...' : (hasMore ? (t('showMore') || 'Show more') : (t('noMore') || 'No more'))}
               </Button>
