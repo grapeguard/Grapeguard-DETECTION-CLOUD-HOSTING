@@ -71,15 +71,15 @@ class GoogleDriveService {
 
   async getDateFolders() {
     try {
-      const url = `${this.baseUrl}/files?` +
-        `q='${this.folderId}' in parents and ` +
-        `mimeType='application/vnd.google-apps.folder' and ` +
-        `trashed=false&` +
-        `orderBy=name desc&` +
-        `fields=files(id,name,createdTime)&` +
-        `supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives&` +
-        `key=${this.apiKey}`;
-      const response = await fetch(url);
+      if (!this.folderId) throw new Error('Missing REACT_APP_DRIVE_FOLDER_ID');
+      const params = new URLSearchParams();
+      params.set('q', `'${this.folderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+      params.set('orderBy', 'name desc');
+      params.set('fields', 'files(id,name,createdTime)');
+      params.set('supportsAllDrives', 'true');
+      params.set('includeItemsFromAllDrives', 'true');
+      params.set('key', this.apiKey);
+      const response = await fetch(`${this.baseUrl}/files?${params.toString()}`);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -102,16 +102,15 @@ class GoogleDriveService {
       console.log(`📸 Getting images from folder: ${folderId}`);
       
       // Back-compat: return first page up to 100
-      const url = `${this.baseUrl}/files?` +
-        `q='${folderId}' in parents and ` +
-        `mimeType contains 'image/' and ` +
-        `trashed=false&` +
-        `orderBy=createdTime desc&` +
-        `pageSize=100&` +
-        `fields=files(id,name,createdTime,size,thumbnailLink,webViewLink),nextPageToken&` +
-        `supportsAllDrives=true&includeItemsFromAllDrives=true&corpora=allDrives&` +
-        `key=${this.apiKey}`;
-      const response = await fetch(url);
+      const params = new URLSearchParams();
+      params.set('q', `'${folderId}' in parents and mimeType contains 'image/' and trashed=false`);
+      params.set('orderBy', 'createdTime desc');
+      params.set('pageSize', '100');
+      params.set('fields', 'files(id,name,createdTime,size,thumbnailLink,webViewLink),nextPageToken');
+      params.set('supportsAllDrives', 'true');
+      params.set('includeItemsFromAllDrives', 'true');
+      params.set('key', this.apiKey);
+      const response = await fetch(`${this.baseUrl}/files?${params.toString()}`);
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -133,13 +132,13 @@ class GoogleDriveService {
   async getImagesFromFolderPage(folderId, pageToken = undefined, pageSize = 100) {
     try {
       const params = new URLSearchParams();
-      params.set('q', `'${folderId}' in parents and mimeType contains 'image/' and trashed=false`);
+      const parent = `'${folderId}' in parents and mimeType contains 'image/' and trashed=false`;
+      params.set('q', parent);
       params.set('orderBy', 'createdTime desc');
       params.set('pageSize', String(pageSize));
       params.set('fields', 'files(id,name,createdTime,size,thumbnailLink,webViewLink),nextPageToken');
       params.set('supportsAllDrives', 'true');
       params.set('includeItemsFromAllDrives', 'true');
-      params.set('corpora', 'allDrives');
       params.set('key', this.apiKey);
       if (pageToken) params.set('pageToken', pageToken);
       const url = `${this.baseUrl}/files?${params.toString()}`;
