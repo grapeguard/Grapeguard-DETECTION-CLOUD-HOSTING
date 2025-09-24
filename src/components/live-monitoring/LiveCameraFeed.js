@@ -229,19 +229,21 @@ export default function LiveCameraFeed() {
           }
         } catch (_) {}
       }
-      // Accumulate many images across folders, then take the next unseen batch of 5
+      // Accumulate images across folders until we have at least DRIVE_BATCH_SIZE unseen items
       let workingImages = images.slice();
-      // First, exhaust pages within the current latest folder
-      if (workingImages.length < end && localFolders.length > 0) {
+      const seen = processedDriveIds;
+      const countUnseen = (arr) => arr.reduce((acc, f) => acc + (seen.has(f.id) ? 0 : 1), 0);
+      // First, exhaust pages within the current folder
+      if (localFolders.length > 0) {
         const currentFolder = localFolders[localFolderIndex] || localFolders[0];
-        while (localPageToken && workingImages.length < end) {
+        while (localPageToken && countUnseen(workingImages) < DRIVE_BATCH_SIZE) {
           const page = await driveService.getImagesFromFolderPage(currentFolder.id, localPageToken, 100);
           workingImages = workingImages.concat(page.files);
           localPageToken = page.nextPageToken || null;
         }
       }
       // Then, move to older folders if still not enough
-      while (workingImages.length < end && localFolders.length > 0 && (localFolderIndex + 1) < localFolders.length) {
+      while (countUnseen(workingImages) < DRIVE_BATCH_SIZE && localFolders.length > 0 && (localFolderIndex + 1) < localFolders.length) {
         const nextIdx = localFolderIndex + 1;
         const nextFolder = localFolders[nextIdx];
         const page = await driveService.getImagesFromFolderPage(nextFolder.id, undefined, 100);
@@ -258,7 +260,6 @@ export default function LiveCameraFeed() {
       if (localFolderIndex !== driveFolderIndex) setDriveFolderIndex(localFolderIndex);
       if (localPageToken !== drivePageToken) setDrivePageToken(localPageToken);
       // Select next unseen batch of DRIVE_BATCH_SIZE
-      const seen = processedDriveIds;
       const batch = [];
       for (const img of workingImages) {
         if (!seen.has(img.id)) batch.push(img);
@@ -349,7 +350,12 @@ export default function LiveCameraFeed() {
                 modelType: 'AI (HF Space)'
               },
               context: 'live',
-              camera: item.camera
+              camera: item.camera,
+              sourceMeta: {
+                originDriveId: item._driveId,
+                originDriveName: item.driveFileName,
+                originCreatedTime: item.driveUploadTime
+              }
             });
             storedOriginalUrl = saved?.image_url || null;
             storedVisualizationUrl = saved?.visualizationImage || null;
