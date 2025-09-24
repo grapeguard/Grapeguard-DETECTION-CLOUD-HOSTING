@@ -73,6 +73,7 @@ export default function LiveCameraFeed() {
   const [driveFolders, setDriveFolders] = useState([]);
   const [driveFolderIndex, setDriveFolderIndex] = useState(0);
   const [drivePageToken, setDrivePageToken] = useState(null);
+  const [isBackgroundSaving, setIsBackgroundSaving] = useState(false);
 
   // Disease name mapping with multilingual support
   const getDiseaseDisplayName = (disease, currentLanguage) => {
@@ -300,6 +301,7 @@ export default function LiveCameraFeed() {
       // Background: run AI detection and persist to Supabase for these Drive items
       if (mapped.length > 0 && isModelLoaded && !modelError) {
         try {
+          setIsBackgroundSaving(true);
           await detectAndPersistForDriveItems(mapped);
         } catch (e) {
           console.error('Background detection for Drive items failed:', e);
@@ -381,11 +383,16 @@ export default function LiveCameraFeed() {
       try {
         if (currentUser?.uid) {
           setIsDriveFallback(false);
-          await loadCloudHistoryPage(currentUser.uid, 0);
+          // Poll Supabase briefly to let background saves appear
+          for (let i = 0; i < 5; i++) {
+            await loadCloudHistoryPage(currentUser.uid, 0);
+            await new Promise(r => setTimeout(r, 800));
+          }
         }
       } catch (_) {
         // Non-blocking
       }
+      setIsBackgroundSaving(false);
     }
   };
 
@@ -846,9 +853,9 @@ export default function LiveCameraFeed() {
                     loadDriveRecent(0, { append: true });
                   }
                 }}
-                disabled={!hasMore || isLoadingPage}
+                disabled={!(hasMore || isBackgroundSaving || isDriveFallback) || isLoadingPage}
               >
-                {isLoadingPage ? t('loading') || 'Loading...' : (hasMore ? (t('showMore') || 'Show more') : (t('noMore') || 'No more'))}
+                {(isLoadingPage || isBackgroundSaving) ? (t('loading') || 'Loading...') : ((hasMore || isDriveFallback) ? (t('showMore') || 'Show more') : (t('noMore') || 'No more'))}
               </Button>
             </Box>
           )}
