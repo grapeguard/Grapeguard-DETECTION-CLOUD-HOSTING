@@ -293,6 +293,13 @@ export default function LiveCameraFeed() {
         };
       }));
 
+      // Immediately surface placeholders in UI so user sees latest 5 images
+      if (batchPrepared.length > 0) {
+        setDetectionHistory(prev => append ? [...prev, ...batchPrepared] : batchPrepared);
+      }
+      // Track page progression for Drive pagination UI
+      setDrivePage(nextDrivePage);
+
       // Background: run AI detection and persist
       if (batchPrepared.length > 0 && isModelLoaded && !modelError) {
         try {
