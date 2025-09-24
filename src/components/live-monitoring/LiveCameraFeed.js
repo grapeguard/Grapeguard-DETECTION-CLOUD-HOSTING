@@ -198,7 +198,8 @@ export default function LiveCameraFeed() {
   useEffect(() => { loadCloudHistoryPage(currentUser?.uid, 0); }, [currentUser?.uid]);
 
   // Drive fallback: load most recent images from latest date folder
-  const loadDriveRecent = async (nextDrivePage = 0) => {
+  const loadDriveRecent = async (nextDrivePage = 0, options = {}) => {
+    const { append = false } = options;
     try {
       setIsLoadingPage(true);
       setIsDriveFallback(true);
@@ -277,7 +278,7 @@ export default function LiveCameraFeed() {
         };
       }))
       .then(list => list.filter(Boolean));
-      if (nextDrivePage === 0) {
+      if (nextDrivePage === 0 && !append) {
         setDetectionHistory(mapped);
       } else {
         setDetectionHistory(prev => [...prev, ...mapped]);
@@ -813,7 +814,9 @@ export default function LiveCameraFeed() {
                   if (isDriveFallback) {
                     loadDriveRecent(drivePage + 1);
                   } else {
-                    loadCloudHistoryPage(currentUser?.uid, page + 1);
+                    // Switch to Drive-based pagination after first Supabase page
+                    setIsDriveFallback(true);
+                    loadDriveRecent(0, { append: true });
                   }
                 }}
                 disabled={!hasMore || isLoadingPage}
